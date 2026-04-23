@@ -1,0 +1,168 @@
+version: "3.9"
+
+# ─── Networks ────────────────────────────────────────────────────────────────
+networks:
+  oj-net:
+    driver: bridge
+
+# ─── Volumes ─────────────────────────────────────────────────────────────────
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       oj
+      POSTGRES_USER:     oj
+      POSTGRES_PASSWORD: oj_secret
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Mount schema migrations so they run on first boot.
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - oj-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oj -d oj"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel notice
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - oj-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  # ── MinIO ───────────────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console (MinIO UI)
+    networks:
+      - oj-net
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  # ── MinIO bucket initialisation (runs once, then exits) ─────────────────────
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - oj-net
+    environment:
+      MINIO_ROOT_USER:     minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - ./scripts/minio-init.sh:/init.sh:ro
+    entrypoint: ["sh", "/init.sh"]
+    restart: "no"
+
+  # ── API Server ──────────────────────────────────────────────────────────────
+  api-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      # Override any flag defaults via environment variables if you wrap with a
+      # shell entrypoint; or pass them directly as command args (shown below).
+      OJ_ENV: production
+    command:
+      - "-addr=:8080"
+      - "-redis-addr=redis:6379"
+      - "-minio-addr=minio:9000"
+      - "-minio-key=minioadmin"
+      - "-minio-secret=minioadmin"
+      # IMPORTANT: replace with a real secret in production (e.g. Docker secret).
+      - "-jwt-key=change-me-in-production"
+      - "-log-level=info"
+    ports:
+      - "8080:8080"
+    networks:
+      - oj-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/health || exit 1"]
+      interval: 15s
+      timeout:  5s
+      retries:  3
+
+  # ── Judger Node ─────────────────────────────────────────────────────────────
+  judger-node:
+    build:
+      context: .
+      dockerfile: Dockerfile.judger
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    # nsjail requires the following kernel capabilities:
+    #   SYS_ADMIN  — for user/mount namespaces
+    #   SYS_PTRACE — for /proc access inside the jail
+    # In production, scope capabilities more tightly and avoid --privileged.
+    privileged: true
+    security_opt:
+      - seccomp:unconfined   # nsjail installs its own seccomp policy per-process
+    command:
+      - "-redis=redis:6379"
+      - "-minio-addr=minio:9000"
+      - "-minio-key=minioadmin"
+      - "-minio-secret=minioadmin"
+      - "-workdir=/tmp/oj-judge"
+      - "-workers=2"
+      - "-nsjail=/usr/sbin/nsjail"
+      - "-seccomp=/configs/seccomp/default.bpf"
+      - "-langs=/configs/languages.yaml"
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw   # cgroup v2 resource limits
+    networks:
+      - oj-net
+    deploy:
+      # Scale horizontally: docker compose up --scale judger-node=4
+      replicas: 1

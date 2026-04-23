@@ -1,0 +1,42 @@
+# ── Build stage ───────────────────────────────────────────────────────────────
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags="-s -w" \
+    -o /out/judger-node ./cmd/judger-node
+
+# ── Runtime stage ─────────────────────────────────────────────────────────────
+# The judger needs:
+#   - nsjail binary (installed from the official PPA or compiled from source)
+#   - g++, python3, javac, etc. for compilation inside the sandbox
+#   - libcap, libseccomp for nsjail
+#
+# This Dockerfile installs the toolchain for C/C++/Python3.
+# For Java/Rust/Go, extend the apt-get block or mount a toolchain volume.
+FROM ubuntu:24.04
+
+# Avoid interactive prompts from apt
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Judge toolchain
+    gcc g++ \
+    python3 python3-pip \
+    # nsjail runtime dependencies
+    libprotobuf-dev libnl-route-3-dev libseccomp-dev \
+    # nsjail itself — install from package if available, else build from source
+    nsjail \
+    # Utilities
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /out/judger-node /judger-node
+COPY configs/ /configs/
+
+# nsjail needs elevated capabilities; run as root inside the container.
+# In production, use a dedicated cgroup namespace rather than --privileged.
+ENTRYPOINT ["/judger-node"]

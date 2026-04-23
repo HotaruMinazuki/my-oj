@@ -1,0 +1,20 @@
+# 排除 Go 编译出的二进制文件
+api-server
+judger-node
+*.exe
+*.out
+
+# 排除 CLion/IntelliJ 的配置
+.idea/
+cmake-build-debug/
+
+# 排除敏感配置文件
+.env
+configs/nginx/secrets.conf
+
+# 排除日志
+logs/
+*.log
+
+# 排除 Go 依赖包镜像（一般不传这个，只传 go.mod）
+vendor/

@@ -1,0 +1,103 @@
+# nsjail BPF seccomp policy for contestant execution.
+# Syntax: ALLOW <syscall_name>  or  ERRNO(<n>) <syscall_name>
+#
+# Philosophy: default-deny.  Only syscalls required by standard
+# compiled C/C++/Go/Rust competitive-programming binaries are allowed.
+# Language runtimes that need more (e.g. Java) should use a separate policy.
+#
+# Tested against nsjail >= 1.0 with Linux kernel >= 5.15.
+#
+# ─── Process lifecycle ────────────────────────────────────────────────────────
+ALLOW exit
+ALLOW exit_group
+ALLOW wait4
+ALLOW waitid
+ALLOW rt_sigreturn
+ALLOW sigreturn
+
+# ─── Memory management ───────────────────────────────────────────────────────
+ALLOW brk
+ALLOW mmap
+ALLOW mmap2
+ALLOW munmap
+ALLOW mremap
+ALLOW mprotect
+ALLOW madvise
+
+# ─── I/O ─────────────────────────────────────────────────────────────────────
+ALLOW read
+ALLOW readv
+ALLOW write
+ALLOW writev
+ALLOW pread64
+ALLOW pwrite64
+ALLOW lseek
+ALLOW _llseek
+
+# FD management (needed by runtime initialisation)
+ALLOW close
+ALLOW dup
+ALLOW dup2
+ALLOW dup3
+ALLOW fcntl
+ALLOW fcntl64
+
+# ─── Process / threading ─────────────────────────────────────────────────────
+ALLOW getpid
+ALLOW gettid
+ALLOW getppid
+ALLOW set_tid_address
+ALLOW clone          # needed by Go runtime (goroutines)
+ALLOW futex          # needed by Go/Rust/glibc mutex
+
+# ─── System information ───────────────────────────────────────────────────────
+ALLOW uname
+ALLOW getrusage
+ALLOW times
+ALLOW clock_gettime
+ALLOW clock_gettime64
+ALLOW gettimeofday
+
+# ─── Signal handling ─────────────────────────────────────────────────────────
+ALLOW rt_sigaction
+ALLOW rt_sigprocmask
+ALLOW rt_sigsuspend
+ALLOW sigaltstack
+ALLOW kill           # only self-kill allowed; enforced by seccomp arg filter
+ALLOW tkill
+ALLOW tgkill
+
+# ─── File access (read-only; write blocked except to /workspace) ─────────────
+# open/openat are intentionally BLOCKED for contestants in standard mode.
+# The standard orchestrator passes input via stdin; output is captured from stdout.
+# Uncomment the following lines ONLY for special-judge interactors:
+#
+# ALLOW open
+# ALLOW openat
+# ALLOW openat2
+
+ALLOW stat
+ALLOW stat64
+ALLOW fstat
+ALLOW fstat64
+ALLOW lstat
+ALLOW lstat64
+ALLOW statx
+ALLOW access
+ALLOW faccessat
+ALLOW readlink
+ALLOW readlinkat
+
+# ─── Blocked (explicit deny with ENOSYS to surface clearly in logs) ──────────
+ERRNO(38) socket       # ENOSYS: no network
+ERRNO(38) connect
+ERRNO(38) bind
+ERRNO(38) listen
+ERRNO(38) accept
+ERRNO(38) sendto
+ERRNO(38) recvfrom
+ERRNO(38) execve       # ENOSYS: no exec of arbitrary binaries
+ERRNO(38) execveat
+ERRNO(38) ptrace       # ENOSYS: no process tracing
+ERRNO(38) perf_event_open  # ENOSYS: no performance counters
+ERRNO(38) bpf          # ENOSYS: no BPF manipulation

@@ -1,0 +1,45 @@
+languages:
+  - language: "C++17"
+    source_file: "main.cpp"
+    compile_cmd: ["g++", "-std=c++17", "-O2", "-Wall", "-o", "main", "main.cpp"]
+    run_cmd: ["./main"]
+    time_limit_multiplier: 1.0
+
+  - language: "C++20"
+    source_file: "main.cpp"
+    compile_cmd: ["g++", "-std=c++20", "-O2", "-Wall", "-o", "main", "main.cpp"]
+    run_cmd: ["./main"]
+    time_limit_multiplier: 1.0
+
+  - language: "C"
+    source_file: "main.c"
+    compile_cmd: ["gcc", "-std=c17", "-O2", "-Wall", "-o", "main", "main.c", "-lm"]
+    run_cmd: ["./main"]
+    time_limit_multiplier: 1.0
+
+  - language: "Java21"
+    source_file: "Main.java"
+    compile_cmd: ["javac", "-encoding", "UTF-8", "Main.java"]
+    # -Xss sets the stack size; -Xmx is the heap cap (enforced by JVM, not cgroup).
+    # The cgroup MemLimitKB must be set higher than -Xmx to account for JVM overhead.
+    run_cmd: ["java", "-Xss64m", "-Xmx512m", "-Xms32m", "Main"]
+    time_limit_multiplier: 2.0
+
+  - language: "Python3"
+    source_file: "main.py"
+    # py_compile performs a syntax check without executing the program.
+    compile_cmd: ["python3", "-m", "py_compile", "main.py"]
+    run_cmd: ["python3", "-u", "main.py"]
+    time_limit_multiplier: 3.0
+
+  - language: "Go"
+    source_file: "main.go"
+    compile_cmd: ["go", "build", "-o", "main", "main.go"]
+    run_cmd: ["./main"]
+    time_limit_multiplier: 1.0
+
+  - language: "Rust"
+    source_file: "main.rs"
+    compile_cmd: ["rustc", "-O", "-o", "main", "main.rs"]
+    run_cmd: ["./main"]
+    time_limit_multiplier: 1.0
