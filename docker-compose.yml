@@ -114,6 +114,7 @@ services:
       OJ_ENV: production
     command:
       - "-addr=:8080"
+      - "-dsn=postgres://oj:oj_secret@postgres:5432/oj?sslmode=disable"
       - "-redis-addr=redis:6379"
       - "-minio-addr=minio:9000"
       - "-minio-key=minioadmin"
@@ -126,7 +127,8 @@ services:
     networks:
       - oj-net
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/health || exit 1"]
+      # nc checks the TCP port is open — avoids false failures from HTTP 404 status codes
+      test: ["CMD-SHELL", "nc -z localhost 8080 && exit 0 || exit 1"]
       interval: 15s
       timeout:  5s
       retries:  3
@@ -156,7 +158,7 @@ services:
       - "-minio-secret=minioadmin"
       - "-workdir=/tmp/oj-judge"
       - "-workers=2"
-      - "-nsjail=/usr/sbin/nsjail"
+      - "-nsjail=/usr/local/bin/nsjail"
       - "-seccomp=/configs/seccomp/default.bpf"
       - "-langs=/configs/languages.yaml"
     volumes:
