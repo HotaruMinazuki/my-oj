@@ -96,26 +96,33 @@ FROM problems WHERE id = $1`
 
 // CreateProblem inserts a new problem and back-fills ID, CreatedAt, UpdatedAt.
 func (r *ProblemRepo) CreateProblem(ctx context.Context, p *models.Problem) error {
+	// NOTE: pass JSONB payloads as string (not []byte). lib/pq encodes []byte as
+	// bytea, which Postgres refuses to implicitly cast to jsonb.
 	const q = `
 INSERT INTO problems (title, statement, time_limit_ms, mem_limit_kb, judge_type, judge_config, allowed_langs, is_public, author_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9)
 RETURNING id, created_at, updated_at`
 
 	judgeConfigJSON, err := json.Marshal(p.JudgeConfig)
 	if err != nil {
 		return fmt.Errorf("marshal judge_config: %w", err)
 	}
-	var allowedLangsJSON []byte
+
+	// NULL when no restriction; otherwise a JSON array string.
+	var allowedLangsParam interface{}
 	if len(p.AllowedLangs) > 0 {
-		allowedLangsJSON, err = json.Marshal(p.AllowedLangs)
+		b, err := json.Marshal(p.AllowedLangs)
 		if err != nil {
 			return fmt.Errorf("marshal allowed_langs: %w", err)
 		}
+		allowedLangsParam = string(b)
+	} else {
+		allowedLangsParam = nil
 	}
 
 	return r.db.QueryRowContext(ctx, q,
 		p.Title, p.Statement, p.TimeLimitMs, p.MemLimitKB,
-		string(p.JudgeType), judgeConfigJSON, allowedLangsJSON,
+		string(p.JudgeType), string(judgeConfigJSON), allowedLangsParam,
 		p.IsPublic, p.AuthorID,
 	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 }

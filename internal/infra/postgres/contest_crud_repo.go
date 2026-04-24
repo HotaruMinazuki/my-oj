@@ -209,10 +209,12 @@ func (r *ContestRepo) IsRegistered(ctx context.Context, contestID, userID models
 // ─── Create ───────────────────────────────────────────────────────────────────
 
 func (r *ContestRepo) Create(ctx context.Context, c *models.Contest) error {
+	// settings is JSONB — send as string so pq encodes it as TEXT (auto-cast
+	// to jsonb), not bytea.
 	const q = `
 INSERT INTO contests (title, description, contest_type, status, start_time, end_time, freeze_time,
                       settings, is_public, allow_late_register, organizer_id)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11)
 RETURNING id, created_at, updated_at`
 
 	settingsJSON, err := json.Marshal(c.Settings)
@@ -228,7 +230,7 @@ RETURNING id, created_at, updated_at`
 	return r.db.QueryRowContext(ctx, q,
 		c.Title, c.Description, string(c.ContestType), string(c.Status),
 		c.StartTime, c.EndTime, freezeTime,
-		settingsJSON, c.IsPublic, c.AllowLateRegister, c.OrganizerID,
+		string(settingsJSON), c.IsPublic, c.AllowLateRegister, c.OrganizerID,
 	).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 }
 
