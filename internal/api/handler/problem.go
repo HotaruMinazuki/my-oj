@@ -130,7 +130,7 @@ func (h *ProblemHandler) Create(c *gin.Context) {
 		p.MemLimitKB = 262144
 	}
 	if p.JudgeType == "" {
-		p.JudgeType = models.JudgeTypeStandard
+		p.JudgeType = models.JudgeStandard
 	}
 
 	if err := h.problems.CreateProblem(c.Request.Context(), p); err != nil {

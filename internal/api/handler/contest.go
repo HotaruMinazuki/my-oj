@@ -72,8 +72,8 @@ func (h *ContestHandler) List(c *gin.Context) {
 // ─── Get  GET /api/v1/contests/:contest_id ────────────────────────────────────
 
 func (h *ContestHandler) Get(c *gin.Context) {
-	id, err := parseContestID(c)
-	if err != nil {
+	id, ok := parseContestID(c)
+	if !ok {
 		return
 	}
 	contest, err := h.contests.GetByID(c.Request.Context(), id)
@@ -102,8 +102,8 @@ func (h *ContestHandler) Get(c *gin.Context) {
 // ─── GetProblems  GET /api/v1/contests/:contest_id/problems ───────────────────
 
 func (h *ContestHandler) GetProblems(c *gin.Context) {
-	id, err := parseContestID(c)
-	if err != nil {
+	id, ok := parseContestID(c)
+	if !ok {
 		return
 	}
 	problems, err := h.contests.GetProblems(c.Request.Context(), id)
@@ -118,8 +118,8 @@ func (h *ContestHandler) GetProblems(c *gin.Context) {
 // ─── Register  POST /api/v1/contests/:contest_id/register ─────────────────────
 
 func (h *ContestHandler) RegisterParticipant(c *gin.Context) {
-	id, err := parseContestID(c)
-	if err != nil {
+	id, ok := parseContestID(c)
+	if !ok {
 		return
 	}
 	uid, ok := middleware.UserIDFromCtx(c)
@@ -208,8 +208,8 @@ type addProblemReq struct {
 }
 
 func (h *ContestHandler) AddProblem(c *gin.Context) {
-	contestID, err := parseContestID(c)
-	if err != nil {
+	contestID, ok := parseContestID(c)
+	if !ok {
 		return
 	}
 	var req addProblemReq
@@ -242,8 +242,8 @@ func (h *ContestHandler) AddProblem(c *gin.Context) {
 // ─── RemoveProblem (Admin) DELETE /api/v1/admin/contests/:contest_id/problems/:problem_id ──
 
 func (h *ContestHandler) RemoveProblem(c *gin.Context) {
-	contestID, err := parseContestID(c)
-	if err != nil {
+	contestID, ok := parseContestID(c)
+	if !ok {
 		return
 	}
 	pidStr := c.Param("problem_id")
@@ -263,14 +263,7 @@ func (h *ContestHandler) RemoveProblem(c *gin.Context) {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-func parseContestID(c *gin.Context) (models.ID, error) {
-	id, err := strconv.ParseInt(c.Param("contest_id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid contest id"})
-		return 0, err
-	}
-	return models.ID(id), nil
-}
+// parseContestID is defined in ranking.go — returns (models.ID, bool).
 
 // isUniqueViolation reports whether err is a Postgres 23505 error (duplicate
 // primary key / unique constraint).
