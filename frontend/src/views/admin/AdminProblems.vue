@@ -99,7 +99,7 @@ import { Plus, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, UploadFile } from 'element-plus'
 import { problemApi } from '@/api/http'
-import type { Problem } from '@/types'
+import type { Problem, JudgeType } from '@/types'
 
 const problems      = ref<Problem[]>([])
 const loading       = ref(false)
@@ -110,7 +110,7 @@ const createDialog  = ref(false)
 const creating      = ref(false)
 const formRef       = ref<FormInstance>()
 const form = reactive({
-  title: '', statement: '', judge_type: 'standard',
+  title: '', statement: '', judge_type: 'standard' as JudgeType,
   time_limit_ms: 2000, mem_limit_kb: 262144, is_public: false,
 })
 const rules = { title: [{ required: true, message: '请填写标题', trigger: 'blur' }] }
@@ -150,6 +150,7 @@ function onFileChange(file: UploadFile) {
 }
 async function handleUpload() {
   if (!uploadFile.value) { ElMessage.warning('请先选择文件'); return }
+  if (!uploadTarget.value) { ElMessage.warning('目标题目丢失'); return }
   uploading.value = true
   try {
     await problemApi.uploadTestcases(uploadTarget.value.id, uploadFile.value)

@@ -175,6 +175,6 @@ export function judgeTypeLabel(t: JudgeType): string {
 
 export function judgeTypeTagType(t: JudgeType): ElTagType {
   return ({
-    special: 'warning', interactive: 'success', communication: 'danger',
+    standard: '', special: 'warning', interactive: 'success', communication: 'danger',
   } as const)[t] ?? ''
 }
