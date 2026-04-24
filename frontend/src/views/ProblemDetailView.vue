@@ -169,9 +169,9 @@ async function handleSubmit() {
   submitting.value = true
   try {
     const res = await submissionApi.submitPractice({
-      problem_id: problem.value!.id,
-      language:   lang.value,
-      source:     code.value,
+      problem_id:  problem.value!.id,
+      language:    lang.value,
+      source_code: code.value,
     })
     lastSubmission.value = res
     startPoll(res.id)

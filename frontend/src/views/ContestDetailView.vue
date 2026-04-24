@@ -231,9 +231,9 @@ async function handleSubmit() {
   submitting.value = true
   try {
     const res = await submissionApi.submit(Number(route.params.id), {
-      problem_id: submitTarget.value!.problem_id,
-      language:   submitLang.value,
-      source:     submitCode.value,
+      problem_id:  submitTarget.value!.problem_id,
+      language:    submitLang.value,
+      source_code: submitCode.value,
     })
     submitVisible.value = false
     ElMessage.success('提交成功！')

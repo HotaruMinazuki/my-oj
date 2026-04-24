@@ -109,10 +109,10 @@ export const contestApi = {
 
 // ─── Submission API ───────────────────────────────────────────────────────────
 export const submissionApi = {
-  submit: (contestId: number, data: { problem_id: number; language: string; source: string }) =>
+  submit: (contestId: number, data: { problem_id: number; language: string; source_code: string }) =>
     http.post<Submission>(`/contests/${contestId}/submissions`, data).then(r => r.data),
 
-  submitPractice: (data: { problem_id: number; language: string; source: string }) =>
+  submitPractice: (data: { problem_id: number; language: string; source_code: string }) =>
     http.post<Submission>('/submissions', data).then(r => r.data),
 
   get: (id: number) =>
