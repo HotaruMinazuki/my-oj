@@ -137,6 +137,8 @@ func main() {
 	// ── Repositories ─────────────────────────────────────────────────────────
 	submissionRepo := postgres.NewSubmissionRepo(db)
 	problemRepo    := postgres.NewProblemRepo(db)
+	userRepo       := postgres.NewUserRepo(db)
+	contestRepo    := postgres.NewContestRepo(db)
 	contestLoader  := postgres.NewContestMetaLoader(db)
 
 	// ── Strategy registry + ranking pipeline ──────────────────────────────────
@@ -162,6 +164,9 @@ func main() {
 		hub,
 		submissionRepo,
 		problemRepo,
+		problemRepo,   // ProblemRepo also satisfies ProblemListRepo
+		userRepo,
+		contestRepo,
 		log,
 	)
 

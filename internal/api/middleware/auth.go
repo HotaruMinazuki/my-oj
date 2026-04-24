@@ -83,3 +83,28 @@ func UserIDFromCtx(c *gin.Context) (models.ID, bool) {
 	id, ok := v.(models.ID)
 	return id, ok
 }
+
+// OptionalAuth tries to parse a Bearer token but never rejects the request.
+// Downstream handlers can check UserIDFromCtx to see if the user is authenticated.
+func OptionalAuth(signingKey []byte) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw := c.GetHeader("Authorization")
+		if !strings.HasPrefix(raw, "Bearer ") {
+			c.Next()
+			return
+		}
+		tokenStr := raw[len("Bearer "):]
+		claims := &Claims{}
+		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return signingKey, nil
+		})
+		if err == nil && token.Valid {
+			c.Set(string(ContextKeyUserID), claims.UserID)
+			c.Set(string(ContextKeyUserRole), claims.Role)
+		}
+		c.Next()
+	}
+}

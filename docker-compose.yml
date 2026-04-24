@@ -1,17 +1,14 @@
 version: "3.9"
 
-# ─── Networks ────────────────────────────────────────────────────────────────
 networks:
   oj-net:
     driver: bridge
 
-# ─── Volumes ─────────────────────────────────────────────────────────────────
 volumes:
   postgres-data:
   redis-data:
   minio-data:
 
-# ─── Services ─────────────────────────────────────────────────────────────────
 services:
 
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
@@ -24,12 +21,10 @@ services:
       POSTGRES_PASSWORD: oj_secret
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      # Mount schema migrations so they run on first boot.
       - ./migrations:/docker-entrypoint-initdb.d:ro
     ports:
       - "5432:5432"
-    networks:
-      - oj-net
+    networks: [oj-net]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U oj -d oj"]
       interval: 10s
@@ -41,17 +36,13 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command: >
-      redis-server
-      --save 60 1
-      --loglevel notice
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
+      redis-server --save 60 1 --loglevel notice
+      --maxmemory 512mb --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
     ports:
       - "6379:6379"
-    networks:
-      - oj-net
+    networks: [oj-net]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -69,24 +60,21 @@ services:
     volumes:
       - minio-data:/data
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web console (MinIO UI)
-    networks:
-      - oj-net
+      - "9000:9000"
+      - "9001:9001"
+    networks: [oj-net]
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout:  5s
       retries:  5
 
-  # ── MinIO bucket initialisation (runs once, then exits) ─────────────────────
+  # ── MinIO bucket initialisation ─────────────────────────────────────────────
   minio-init:
     image: minio/mc:latest
     depends_on:
-      minio:
-        condition: service_healthy
-    networks:
-      - oj-net
+      minio: { condition: service_healthy }
+    networks: [oj-net]
     environment:
       MINIO_ROOT_USER:     minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -102,15 +90,10 @@ services:
       dockerfile: Dockerfile.api
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
+      postgres:   { condition: service_healthy }
+      redis:      { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
     environment:
-      # Override any flag defaults via environment variables if you wrap with a
-      # shell entrypoint; or pass them directly as command args (shown below).
       OJ_ENV: production
     command:
       - "-addr=:8080"
@@ -119,19 +102,26 @@ services:
       - "-minio-addr=minio:9000"
       - "-minio-key=minioadmin"
       - "-minio-secret=minioadmin"
-      # IMPORTANT: replace with a real secret in production (e.g. Docker secret).
       - "-jwt-key=change-me-in-production"
       - "-log-level=info"
-    ports:
-      - "8080:8080"
-    networks:
-      - oj-net
+    networks: [oj-net]
     healthcheck:
-      # nc checks the TCP port is open — avoids false failures from HTTP 404 status codes
       test: ["CMD-SHELL", "nc -z localhost 8080 && exit 0 || exit 1"]
       interval: 15s
       timeout:  5s
       retries:  3
+
+  # ── Frontend (Vue3 + Nginx) ─────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: unless-stopped
+    depends_on:
+      api-server: { condition: service_healthy }
+    ports:
+      - "8088:80"
+    networks: [oj-net]
 
   # ── Judger Node ─────────────────────────────────────────────────────────────
   judger-node:
@@ -140,17 +130,11 @@ services:
       dockerfile: Dockerfile.judger
     restart: unless-stopped
     depends_on:
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-    # nsjail requires the following kernel capabilities:
-    #   SYS_ADMIN  — for user/mount namespaces
-    #   SYS_PTRACE — for /proc access inside the jail
-    # In production, scope capabilities more tightly and avoid --privileged.
+      redis:      { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
     privileged: true
     security_opt:
-      - seccomp:unconfined   # nsjail installs its own seccomp policy per-process
+      - seccomp:unconfined
     command:
       - "-redis=redis:6379"
       - "-minio-addr=minio:9000"
@@ -162,9 +146,7 @@ services:
       - "-seccomp=/configs/seccomp/default.bpf"
       - "-langs=/configs/languages.yaml"
     volumes:
-      - /sys/fs/cgroup:/sys/fs/cgroup:rw   # cgroup v2 resource limits
-    networks:
-      - oj-net
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    networks: [oj-net]
     deploy:
-      # Scale horizontally: docker compose up --scale judger-node=4
       replicas: 1

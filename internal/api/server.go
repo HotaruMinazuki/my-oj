@@ -45,6 +45,9 @@ func NewServer(
 	hub *ranking.Hub,
 	submissions handler.SubmissionRepo,
 	problems handler.ProblemRepo,
+	problemList handler.ProblemListRepo,
+	users handler.AuthUserRepo,
+	contests handler.ContestCRUDRepo,
 	log *zap.Logger,
 ) *Server {
 	if cfg.ReadTimeout == 0 {
@@ -65,23 +68,55 @@ func NewServer(
 	r.Use(gin.Recovery())
 	r.Use(corsHeaders())
 
+	// ── Static frontend (built by Vite, served from /app) ─────────────────────
+	r.Static("/assets", "/app/assets")
+	r.StaticFile("/favicon.ico", "/app/favicon.ico")
+	// Serve index.html for all non-API routes (Vue Router history mode).
+	r.NoRoute(func(c *gin.Context) {
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		if len(c.Request.URL.Path) >= 3 && c.Request.URL.Path[:3] == "/ws" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.File("/app/index.html")
+	})
+
 	// ── Handlers ───────────────────────────────────────────────────────────────
 	rankingH    := handler.NewRankingHandler(hub, rdb, log)
 	submissionH := handler.NewSubmissionHandler(submissions, problems, publisher, store, log)
 	adminH      := handler.NewAdminHandler(rankingService, store, log)
+	authH       := handler.NewAuthHandler(users, cfg.JWTSigningKey, log)
+	problemH    := handler.NewProblemHandler(problemList, log)
+	contestH    := handler.NewContestHandler(contests, log)
 
 	auth      := middleware.Auth(cfg.JWTSigningKey)
 	adminOnly := middleware.RequireRole(models.RoleAdmin)
+	// optAuth tries to parse the token but does not reject unauthenticated requests.
+	optAuth := middleware.OptionalAuth(cfg.JWTSigningKey)
 
 	// ── WebSocket ─────────────────────────────────────────────────────────────
-	// No JWT on the WebSocket path — browsers can't set custom headers on native
-	// WebSocket upgrades.  Authenticate via a short-lived token in the query string
-	// if needed (implementation left as a follow-up hardening step).
 	r.GET("/ws/ranking/:contest_id", rankingH.ServeWS)
 
 	// ── Public REST API ───────────────────────────────────────────────────────
 	v1 := r.Group("/api/v1")
 	{
+		// Auth
+		v1.POST("/auth/register", authH.Register)
+		v1.POST("/auth/login", authH.Login)
+		v1.GET("/auth/me", auth, authH.Me)
+
+		// Problems (public list; detail visible if is_public or admin)
+		v1.GET("/problems", optAuth, problemH.List)
+		v1.GET("/problems/:id", optAuth, problemH.Get)
+
+		// Contests (public list; detail always readable)
+		v1.GET("/contests", optAuth, contestH.List)
+		v1.GET("/contests/:contest_id", optAuth, contestH.Get)
+		v1.GET("/contests/:contest_id/problems", contestH.GetProblems)
+
 		// Ranking snapshot — read-only, no auth required for public contests.
 		v1.GET("/contests/:contest_id/ranking", rankingH.GetSnapshot)
 
@@ -89,6 +124,7 @@ func NewServer(
 		authed := v1.Group("/", auth)
 		{
 			authed.GET("/contests/:contest_id/ranking/me", rankingH.GetUserRank)
+			authed.POST("/contests/:contest_id/register", contestH.RegisterParticipant)
 
 			// Contest submissions
 			authed.POST("/contests/:contest_id/submissions", submissionH.Submit)
@@ -104,8 +140,12 @@ func NewServer(
 			// 滚榜: call repeatedly during post-contest ceremony
 			admin.POST("/contests/:contest_id/unfreeze-next", adminH.UnfreezeNext)
 
-			// Test-case management: upload a zip of .in/.out files for a problem
+			// Test-case management
 			admin.POST("/problems/:id/testcases", adminH.UploadTestcases)
+
+			// Problem & contest management
+			admin.POST("/problems", problemH.Create)
+			admin.POST("/contests", contestH.Create)
 		}
 	}
 

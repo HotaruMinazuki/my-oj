@@ -1,0 +1,95 @@
+/* ─── Design tokens ─────────────────────────────────────────────────────── */
+:root {
+  --oj-primary: #409eff;
+  --oj-success: #67c23a;
+  --oj-warning: #e6a23c;
+  --oj-danger:  #f56c6c;
+  --oj-info:    #909399;
+
+  --oj-bg:       #f5f7fa;
+  --oj-card-bg:  #ffffff;
+  --oj-text:     #1d2129;
+  --oj-text-2:   #4e5969;
+  --oj-text-3:   #86909c;
+  --oj-border:   #e5e6eb;
+
+  --oj-nav-bg:     #1d2129;
+  --oj-nav-text:   #c9cdd4;
+  --oj-nav-active: #ffffff;
+
+  --oj-radius:    6px;
+  --oj-radius-lg: 10px;
+  --oj-shadow-sm: 0 1px 3px rgba(0,0,0,.04);
+  --oj-shadow:    0 2px 12px rgba(0,0,0,.06);
+  --oj-shadow-lg: 0 8px 24px rgba(0,0,0,.08);
+
+  --oj-max-w: 1280px;
+}
+
+/* ─── Reset / base ──────────────────────────────────────────────────────── */
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+body {
+  background: var(--oj-bg);
+  color: var(--oj-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue',
+               'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+               sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: inherit; text-decoration: none; }
+
+/* Utility: link text */
+.link-text {
+  color: var(--oj-primary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: opacity .15s;
+}
+.link-text:hover { text-decoration: underline; }
+
+/* ─── Scrollbar polish ──────────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb  { background: #c6c9d1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #a4a8b3; }
+::-webkit-scrollbar-track  { background: transparent; }
+
+/* ─── Fade-in util ──────────────────────────────────────────────────────── */
+.oj-fade-in { animation: oj-fade-in .25s ease-out; }
+@keyframes oj-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Router link active styling ───────────────────────────────────────── */
+.router-link-active { font-weight: 600; }
+
+/* ─── Page container ───────────────────────────────────────────────────── */
+.page {
+  max-width: var(--oj-max-w);
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+
+/* ─── Element Plus fine-tunes ──────────────────────────────────────────── */
+.el-card {
+  border: 1px solid var(--oj-border) !important;
+  border-radius: var(--oj-radius-lg) !important;
+  box-shadow: var(--oj-shadow-sm) !important;
+}
+.el-button--primary { box-shadow: 0 2px 6px rgba(64,158,255,.18); }
+
+/* Keep table cells vertically compact */
+.el-table td, .el-table th { padding: 10px 8px !important; }
+
+/* ─── Responsive helpers ───────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .hide-on-mobile { display: none !important; }
+  .page { padding: 16px 12px; }
+}
