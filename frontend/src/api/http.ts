@@ -109,11 +109,12 @@ export const contestApi = {
 
 // ─── Submission API ───────────────────────────────────────────────────────────
 export const submissionApi = {
+  // Submit endpoints return a compact ack: { id, status } (not the full Submission).
   submit: (contestId: number, data: { problem_id: number; language: string; source_code: string }) =>
-    http.post<Submission>(`/contests/${contestId}/submissions`, data).then(r => r.data),
+    http.post<{ id: number; status: string }>(`/contests/${contestId}/submissions`, data).then(r => r.data),
 
   submitPractice: (data: { problem_id: number; language: string; source_code: string }) =>
-    http.post<Submission>('/submissions', data).then(r => r.data),
+    http.post<{ id: number; status: string }>('/submissions', data).then(r => r.data),
 
   get: (id: number) =>
     http.get<Submission>(`/submissions/${id}`).then(r => r.data),

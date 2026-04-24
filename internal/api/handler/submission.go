@@ -272,7 +272,7 @@ func (h *SubmissionHandler) enqueueTask(
 	if _, err := h.publisher.Publish(ctx, mq.QueueJudgeTasks, payload); err != nil {
 		h.log.Error("enqueue judge task", zap.Error(err), zap.Int64("submission_id", sub.ID))
 		c.JSON(http.StatusAccepted, gin.H{
-			"submission_id": sub.ID,
+			"id":            sub.ID,
 			"status":        sub.Status,
 			"warning":       "enqueue failed; submission recorded and will be retried",
 		})
@@ -280,7 +280,7 @@ func (h *SubmissionHandler) enqueueTask(
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"submission_id": sub.ID,
+		"id":            sub.ID,
 		"status":        sub.Status,
 	})
 }

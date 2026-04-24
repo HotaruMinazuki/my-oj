@@ -173,7 +173,8 @@ async function handleSubmit() {
       language:    lang.value,
       source_code: code.value,
     })
-    lastSubmission.value = res
+    // The submit ack only contains {id,status}; let the first poll fill the rest.
+    lastSubmission.value = null
     startPoll(res.id)
     ElMessage.success('提交成功，评测中…')
   } finally {
