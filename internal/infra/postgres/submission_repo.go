@@ -31,7 +31,7 @@ INSERT INTO submissions (
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9,
-    $10, $11, $12, $13
+    $10, $11, $12::jsonb, $13
 ) RETURNING id, created_at, updated_at`
 
 // Create inserts a new Submission row and back-fills ID, CreatedAt, UpdatedAt.
@@ -40,6 +40,12 @@ func (r *SubmissionRepo) Create(ctx context.Context, s *models.Submission) error
 	tcJSON, err := marshalJSONB(s.TestCaseResults)
 	if err != nil {
 		return fmt.Errorf("marshal test_case_results: %w", err)
+	}
+	// pq encodes []byte as bytea, which Postgres will not implicitly cast to
+	// jsonb. Send as string so it arrives as TEXT (with ::jsonb on the column).
+	var tcParam interface{}
+	if tcJSON != nil {
+		tcParam = string(tcJSON)
 	}
 
 	row := r.db.QueryRowContext(ctx, insertSubmissionSQL,
@@ -54,7 +60,7 @@ func (r *SubmissionRepo) Create(ctx context.Context, s *models.Submission) error
 		s.MemUsedKB,
 		s.CompileLog,
 		s.JudgeMessage,
-		tcJSON,
+		tcParam,
 		s.JudgeNodeID,
 	)
 	return row.Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
@@ -118,7 +124,7 @@ UPDATE submissions SET
     mem_used_kb       = $5,
     compile_log       = $6,
     judge_message     = $7,
-    test_case_results = $8,
+    test_case_results = $8::jsonb,
     judge_node_id     = $9,
     updated_at        = NOW()
 WHERE id = $1`
@@ -127,6 +133,11 @@ func (r *SubmissionRepo) Update(ctx context.Context, s *models.Submission) error
 	tcJSON, err := marshalJSONB(s.TestCaseResults)
 	if err != nil {
 		return fmt.Errorf("marshal test_case_results: %w", err)
+	}
+	// Same bytea → jsonb pitfall as Create: pass as string, nil stays SQL NULL.
+	var tcParam interface{}
+	if tcJSON != nil {
+		tcParam = string(tcJSON)
 	}
 
 	res, err := r.db.ExecContext(ctx, updateSubmissionSQL,
@@ -137,7 +148,7 @@ func (r *SubmissionRepo) Update(ctx context.Context, s *models.Submission) error
 		s.MemUsedKB,
 		s.CompileLog,
 		s.JudgeMessage,
-		tcJSON,
+		tcParam,
 		s.JudgeNodeID,
 	)
 	if err != nil {
