@@ -99,6 +99,12 @@ export const contestApi = {
 
   unfreezeNext: (id: number) =>
     http.post<{ done?: boolean }>(`/admin/contests/${id}/unfreeze-next`).then(r => r.data),
+
+  addProblem: (contestId: number, data: { problem_id: number; label: string; max_score?: number; ordinal?: number }) =>
+    http.post(`/admin/contests/${contestId}/problems`, data).then(r => r.data),
+
+  removeProblem: (contestId: number, problemId: number) =>
+    http.delete(`/admin/contests/${contestId}/problems/${problemId}`).then(r => r.data),
 }
 
 // ─── Submission API ───────────────────────────────────────────────────────────

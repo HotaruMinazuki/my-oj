@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 	"go.uber.org/zap"
 
 	"github.com/your-org/my-oj/internal/api/middleware"
@@ -22,6 +24,8 @@ type ContestCRUDRepo interface {
 	Register(ctx context.Context, contestID, userID models.ID) error
 	IsRegistered(ctx context.Context, contestID, userID models.ID) (bool, error)
 	Create(ctx context.Context, c *models.Contest) error
+	AddProblem(ctx context.Context, contestID, problemID models.ID, label string, maxScore, ordinal int) error
+	RemoveProblem(ctx context.Context, contestID, problemID models.ID) error
 }
 
 // ContestHandler serves contest list, detail, registration, and admin endpoints.
@@ -194,6 +198,69 @@ func (h *ContestHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, contest)
 }
 
+// ─── AddProblem (Admin)  POST /api/v1/admin/contests/:contest_id/problems ────
+
+type addProblemReq struct {
+	ProblemID models.ID `json:"problem_id" binding:"required"`
+	Label     string    `json:"label"      binding:"required"`
+	MaxScore  int       `json:"max_score"`
+	Ordinal   int       `json:"ordinal"`
+}
+
+func (h *ContestHandler) AddProblem(c *gin.Context) {
+	contestID, err := parseContestID(c)
+	if err != nil {
+		return
+	}
+	var req addProblemReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.contests.AddProblem(
+		c.Request.Context(), contestID, req.ProblemID,
+		req.Label, req.MaxScore, req.Ordinal,
+	); err != nil {
+		// Duplicate (same contest + problem) returns Postgres error 23505;
+		// surface as 409 for the UI to show a friendlier message.
+		if isUniqueViolation(err) {
+			c.JSON(http.StatusConflict, gin.H{"error": "problem already in contest"})
+			return
+		}
+		if isForeignKeyViolation(err) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "contest or problem not found"})
+			return
+		}
+		h.log.Error("add problem to contest", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"message": "problem added"})
+}
+
+// ─── RemoveProblem (Admin) DELETE /api/v1/admin/contests/:contest_id/problems/:problem_id ──
+
+func (h *ContestHandler) RemoveProblem(c *gin.Context) {
+	contestID, err := parseContestID(c)
+	if err != nil {
+		return
+	}
+	pidStr := c.Param("problem_id")
+	pid, err := strconv.ParseInt(pidStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid problem id"})
+		return
+	}
+
+	if err := h.contests.RemoveProblem(c.Request.Context(), contestID, models.ID(pid)); err != nil {
+		h.log.Error("remove problem from contest", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "problem removed"})
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func parseContestID(c *gin.Context) (models.ID, error) {
@@ -203,4 +270,18 @@ func parseContestID(c *gin.Context) (models.ID, error) {
 		return 0, err
 	}
 	return models.ID(id), nil
+}
+
+// isUniqueViolation reports whether err is a Postgres 23505 error (duplicate
+// primary key / unique constraint).
+func isUniqueViolation(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23505"
+}
+
+// isForeignKeyViolation reports whether err is a Postgres 23503 error
+// (referenced row does not exist).
+func isForeignKeyViolation(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23503"
 }

@@ -128,6 +128,62 @@ ORDER  BY cp.ordinal`
 	return out, rows.Err()
 }
 
+// ─── AddProblem ───────────────────────────────────────────────────────────────
+
+// AddProblem inserts a problem into a contest. If ordinal is 0, it's set to
+// MAX(ordinal)+1 so the new problem appears at the end. Returns a wrapped
+// error that callers can check with errors.Is(err, ErrDuplicateProblem) /
+// ErrContestNotFound / ErrProblemNotFound.
+func (r *ContestRepo) AddProblem(ctx context.Context, contestID, problemID models.ID, label string, maxScore, ordinal int) error {
+	// Use a transaction so concurrent inserts pick distinct ordinals.
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // safe to ignore after Commit
+
+	if ordinal <= 0 {
+		var maxOrd sql.NullInt64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT MAX(ordinal) FROM contest_problems WHERE contest_id=$1`,
+			contestID,
+		).Scan(&maxOrd); err != nil {
+			return fmt.Errorf("query max ordinal: %w", err)
+		}
+		if maxOrd.Valid {
+			ordinal = int(maxOrd.Int64) + 1
+		} else {
+			ordinal = 1
+		}
+	}
+	if maxScore <= 0 {
+		maxScore = 100
+	}
+
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO contest_problems (contest_id, problem_id, label, max_score, ordinal)
+VALUES ($1, $2, $3, $4, $5)`,
+		contestID, problemID, label, maxScore, ordinal,
+	)
+	if err != nil {
+		return fmt.Errorf("insert contest_problem: %w", err)
+	}
+	return tx.Commit()
+}
+
+// RemoveProblem deletes a problem from a contest. Returns nil if the row
+// did not exist (idempotent).
+func (r *ContestRepo) RemoveProblem(ctx context.Context, contestID, problemID models.ID) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM contest_problems WHERE contest_id=$1 AND problem_id=$2`,
+		contestID, problemID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete contest_problem: %w", err)
+	}
+	return nil
+}
+
 // ─── Register ─────────────────────────────────────────────────────────────────
 
 func (r *ContestRepo) Register(ctx context.Context, contestID, userID models.ID) error {

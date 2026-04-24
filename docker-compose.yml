@@ -11,7 +11,6 @@ volumes:
 
 services:
 
-  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -24,32 +23,35 @@ services:
       - ./migrations:/docker-entrypoint-initdb.d:ro
     ports:
       - "5432:5432"
-    networks: [oj-net]
+    networks:
+      - oj-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U oj -d oj"]
       interval: 10s
       timeout:  5s
       retries:  5
 
-  # ── Redis ───────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     command: >
-      redis-server --save 60 1 --loglevel notice
-      --maxmemory 512mb --maxmemory-policy allkeys-lru
+      redis-server
+      --save 60 1
+      --loglevel notice
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
     ports:
       - "6379:6379"
-    networks: [oj-net]
+    networks:
+      - oj-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout:  5s
       retries:  5
 
-  # ── MinIO ───────────────────────────────────────────────────────────────────
   minio:
     image: minio/minio:latest
     restart: unless-stopped
@@ -62,19 +64,21 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
-    networks: [oj-net]
+    networks:
+      - oj-net
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout:  5s
       retries:  5
 
-  # ── MinIO bucket initialisation ─────────────────────────────────────────────
   minio-init:
     image: minio/mc:latest
     depends_on:
-      minio: { condition: service_healthy }
-    networks: [oj-net]
+      minio:
+        condition: service_healthy
+    networks:
+      - oj-net
     environment:
       MINIO_ROOT_USER:     minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -83,16 +87,18 @@ services:
     entrypoint: ["sh", "/init.sh"]
     restart: "no"
 
-  # ── API Server ──────────────────────────────────────────────────────────────
   api-server:
     build:
       context: .
       dockerfile: Dockerfile.api
     restart: unless-stopped
     depends_on:
-      postgres:   { condition: service_healthy }
-      redis:      { condition: service_healthy }
-      minio-init: { condition: service_completed_successfully }
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       OJ_ENV: production
     command:
@@ -104,34 +110,26 @@ services:
       - "-minio-secret=minioadmin"
       - "-jwt-key=change-me-in-production"
       - "-log-level=info"
-    networks: [oj-net]
+    ports:
+      - "8088:8080"
+    networks:
+      - oj-net
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 8080 && exit 0 || exit 1"]
       interval: 15s
       timeout:  5s
       retries:  3
 
-  # ── Frontend (Vue3 + Nginx) ─────────────────────────────────────────────────
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    restart: unless-stopped
-    depends_on:
-      api-server: { condition: service_healthy }
-    ports:
-      - "8088:80"
-    networks: [oj-net]
-
-  # ── Judger Node ─────────────────────────────────────────────────────────────
   judger-node:
     build:
       context: .
       dockerfile: Dockerfile.judger
     restart: unless-stopped
     depends_on:
-      redis:      { condition: service_healthy }
-      minio-init: { condition: service_completed_successfully }
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     privileged: true
     security_opt:
       - seccomp:unconfined
@@ -147,6 +145,7 @@ services:
       - "-langs=/configs/languages.yaml"
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
-    networks: [oj-net]
+    networks:
+      - oj-net
     deploy:
       replicas: 1

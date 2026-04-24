@@ -26,7 +26,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 # RUN sed -i 's/archive.ubuntu.com/mirrors.tencentyun.com/g' /etc/apt/sources.list && \
 #     sed -i 's/security.ubuntu.com/mirrors.tencentyun.com/g' /etc/apt/sources.list
 
-# 安装编译所需的依赖
 # 安装编译所需的依赖（补齐了 flex 和 bison）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ make git pkg-config \
@@ -36,8 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 核心修改：使用 gitclone.com 镜像加速克隆 nsjail
-# 这样可以极大提高在服务器上拉取源码的成功率
+# 手动克隆并编译 nsjail (继续使用加速镜像)
 RUN git clone https://gitclone.com/github.com/google/nsjail.git /opt/nsjail && \
     cd /opt/nsjail && \
     make && \

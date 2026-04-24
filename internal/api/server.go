@@ -146,6 +146,10 @@ func NewServer(
 			// Problem & contest management
 			admin.POST("/problems", problemH.Create)
 			admin.POST("/contests", contestH.Create)
+
+			// Contest ↔ problem linking
+			admin.POST("/contests/:contest_id/problems", contestH.AddProblem)
+			admin.DELETE("/contests/:contest_id/problems/:problem_id", contestH.RemoveProblem)
 		}
 	}
 
