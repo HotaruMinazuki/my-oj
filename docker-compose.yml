@@ -110,15 +110,26 @@ services:
       - "-minio-secret=minioadmin"
       - "-jwt-key=change-me-in-production"
       - "-log-level=info"
-    ports:
-      - "8088:8080"
     networks:
       - oj-net
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 8080 && exit 0 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/contests?size=1 >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout:  5s
       retries:  3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: unless-stopped
+    depends_on:
+      api-server:
+        condition: service_healthy
+    ports:
+      - "8088:80"
+    networks:
+      - oj-net
 
   judger-node:
     build:
