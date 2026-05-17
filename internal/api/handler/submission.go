@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/your-org/my-oj/internal/api/middleware"
 	"github.com/your-org/my-oj/internal/models"
 	"github.com/your-org/my-oj/internal/mq"
 	"github.com/your-org/my-oj/internal/storage"
@@ -173,6 +174,18 @@ func (h *SubmissionHandler) GetSubmission(c *gin.Context) {
 		return
 	}
 
+	// Resolve identity first; defence in depth even though `auth` middleware
+	// is already required by the router. If somehow the middleware is removed
+	// or bypassed, we still fail closed rather than 403-by-accident leaking
+	// "this submission exists" information to anonymous callers.
+	userID, ok := middleware.UserIDFromCtx(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		return
+	}
+	roleVal, _ := c.Get(string(middleware.ContextKeyUserRole))
+	role, _ := roleVal.(models.UserRole)
+
 	ctx := c.Request.Context()
 	sub, err := h.submissions.GetByID(ctx, models.ID(id64))
 	if err != nil {
@@ -180,9 +193,6 @@ func (h *SubmissionHandler) GetSubmission(c *gin.Context) {
 		return
 	}
 
-	userID, _ := mustUserID(c)
-	roleVal, _ := c.Get("user_role")
-	role, _ := roleVal.(models.UserRole)
 	if role != models.RoleAdmin && sub.UserID != userID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return

@@ -101,12 +101,63 @@ func (h *ContestHandler) Get(c *gin.Context) {
 
 // ─── GetProblems  GET /api/v1/contests/:contest_id/problems ───────────────────
 
+// GetProblems lists the problems attached to a contest.
+//
+// Access policy:
+//   - Admin: always allowed.
+//   - Authenticated non-admin: allowed if the contest is public OR they are a
+//     registered participant.
+//   - Anonymous: allowed only if the contest is public AND status != draft.
+//
+// Draft contests (status == draft) are hidden from all non-admin viewers to
+// avoid leaking problem labels/titles before publication.
 func (h *ContestHandler) GetProblems(c *gin.Context) {
 	id, ok := parseContestID(c)
 	if !ok {
 		return
 	}
-	problems, err := h.contests.GetProblems(c.Request.Context(), id)
+
+	ctx := c.Request.Context()
+	contest, err := h.contests.GetByID(ctx, id)
+	if err != nil {
+		h.log.Error("get contest for problems", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if contest == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "contest not found"})
+		return
+	}
+
+	// Role + identity from optional auth.
+	roleVal, _ := c.Get(string(middleware.ContextKeyUserRole))
+	role, _ := roleVal.(models.UserRole)
+	uid, authed := middleware.UserIDFromCtx(c)
+
+	if role != models.RoleAdmin {
+		if contest.Status == models.ContestStatusDraft {
+			c.JSON(http.StatusNotFound, gin.H{"error": "contest not found"})
+			return
+		}
+		if !contest.IsPublic {
+			if !authed {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+				return
+			}
+			registered, err := h.contests.IsRegistered(ctx, id, uid)
+			if err != nil {
+				h.log.Error("check registration", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+				return
+			}
+			if !registered {
+				c.JSON(http.StatusForbidden, gin.H{"error": "not a participant of this contest"})
+				return
+			}
+		}
+	}
+
+	problems, err := h.contests.GetProblems(ctx, id)
 	if err != nil {
 		h.log.Error("get contest problems", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})

@@ -221,7 +221,10 @@ async function handleRegister() {
 function openSubmit(row: ContestProblemSummary) {
   if (!auth.isLoggedIn) { router.push('/login'); return }
   submitTarget.value  = row
-  submitCode.value    = '// 在此输入代码\n'
+  // Leave submitCode empty so CodeEditor can load any persisted draft for
+  // this problem/language. Pre-seeding boilerplate here would override the
+  // draft load (modelValue takes precedence over loadDraft() in CodeEditor).
+  submitCode.value    = ''
   submitLang.value    = 'C++17'
   submitVisible.value = true
 }

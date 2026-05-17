@@ -115,7 +115,7 @@ func NewServer(
 		// Contests (public list; detail always readable)
 		v1.GET("/contests", optAuth, contestH.List)
 		v1.GET("/contests/:contest_id", optAuth, contestH.Get)
-		v1.GET("/contests/:contest_id/problems", contestH.GetProblems)
+		v1.GET("/contests/:contest_id/problems", optAuth, contestH.GetProblems)
 
 		// Ranking snapshot — read-only, no auth required for public contests.
 		v1.GET("/contests/:contest_id/ranking", rankingH.GetSnapshot)

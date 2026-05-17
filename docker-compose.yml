@@ -1,5 +1,3 @@
-version: "3.9"
-
 networks:
   oj-net:
     driver: bridge

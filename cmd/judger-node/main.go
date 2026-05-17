@@ -43,7 +43,7 @@ func main() {
 	minioSSL       := flag.Bool("minio-ssl",       false,                          "Use TLS for MinIO")
 	workBaseDir    := flag.String("workdir",       "/tmp/oj-judge",                "sandbox work directory base")
 	workers        := flag.Int("workers",          2,                              "concurrent judging workers")
-	nsjailBin      := flag.String("nsjail",        "/usr/sbin/nsjail",             "path to nsjail binary")
+	nsjailBin      := flag.String("nsjail",        "/usr/local/bin/nsjail",        "path to nsjail binary")
 	seccompPolicy  := flag.String("seccomp",       "configs/seccomp/default.bpf", "seccomp BPF policy path")
 	flag.Parse()
 

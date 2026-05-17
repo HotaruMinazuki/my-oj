@@ -183,15 +183,33 @@ async function handleSubmit() {
 }
 
 function startPoll(id: number) {
+  // Cancel any previous poll before starting a new one. Each callback is
+  // bound to its own timer reference so a stale in-flight request from a
+  // prior submission can't overwrite current state or clear the new timer
+  // when it finally resolves.
   if (pollTimer) clearInterval(pollTimer)
-  pollTimer = setInterval(async () => {
-    const sub = await submissionApi.get(id)
-    lastSubmission.value = sub
-    if (TERMINAL_STATUSES.includes(sub.status)) {
-      clearInterval(pollTimer!)
-      pollTimer = null
+  const myTimer: ReturnType<typeof setInterval> = setInterval(async () => {
+    try {
+      const sub = await submissionApi.get(id)
+      // Bail if we've been superseded by another submission.
+      if (myTimer !== pollTimer) return
+      lastSubmission.value = sub
+      if (TERMINAL_STATUSES.includes(sub.status)) {
+        clearInterval(myTimer)
+        if (pollTimer === myTimer) pollTimer = null
+      }
+    } catch {
+      // Hard failure: stop polling so the axios interceptor's toast doesn't
+      // fire every 1.5 s forever.
+      if (myTimer === pollTimer) {
+        clearInterval(myTimer)
+        pollTimer = null
+      } else {
+        clearInterval(myTimer)
+      }
     }
   }, 1500)
+  pollTimer = myTimer
 }
 
 // ── Status helpers ─────────────────────────────────────────────────────────
