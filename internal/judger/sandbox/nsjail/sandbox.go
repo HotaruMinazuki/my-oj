@@ -87,9 +87,19 @@ type Sandbox struct {
 }
 
 // New creates a Sandbox and verifies that the nsjail binary exists.
+// If SeccompPolicyPath is non-empty it must also point to a readable file —
+// passing nsjail a bogus seccomp path makes every execution fail at runtime,
+// which is much harder to diagnose than failing here at boot.
 func New(cfg Config, log *zap.Logger) (*Sandbox, error) {
 	if _, err := os.Stat(cfg.BinaryPath); err != nil {
 		return nil, fmt.Errorf("nsjail: binary not found at %q: %w", cfg.BinaryPath, err)
+	}
+	if cfg.SeccompPolicyPath != "" {
+		if _, err := os.Stat(cfg.SeccompPolicyPath); err != nil {
+			return nil, fmt.Errorf("nsjail: seccomp policy not found at %q: %w", cfg.SeccompPolicyPath, err)
+		}
+	} else {
+		log.Warn("nsjail: SeccompPolicyPath empty — sandbox will not filter syscalls (insecure for production)")
 	}
 	if cfg.CgroupParent == "" {
 		cfg.CgroupParent = "oj-judge"

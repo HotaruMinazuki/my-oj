@@ -71,7 +71,7 @@ async function handleUnfreeze() {
 <style scoped>
 .page-header { margin-bottom: 16px; }
 .page-header h2 { margin: 4px 0 0; font-size: 22px; }
-.back-link { color: #409eff; text-decoration: none; font-size: 14px; }
+.back-link { color: var(--oj-primary); text-decoration: none; font-size: 14px; }
 .last-result { margin-top: 24px; text-align: left; }
-.last-result pre { background: #f5f7fa; padding: 12px; border-radius: 4px; font-size: 13px; overflow: auto; }
+.last-result pre { background: var(--oj-bg); padding: 12px; border-radius: var(--oj-radius); font-size: 13px; overflow: auto; }
 </style>

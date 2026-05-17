@@ -22,6 +22,10 @@ const (
 	blockDuration = 5 * time.Second  // XREADGROUP BLOCK timeout; prevents busy-waiting
 	reclaimAfter  = 60 * time.Second // reclaim pending messages older than this on startup
 	pendingBatch  = 64               // messages to scan per PEL drain iteration
+	// streamMaxLen caps each stream's length so that ACK'd entries (which Redis
+	// only trims on XADD with MAXLEN) cannot grow unbounded over weeks of uptime.
+	// Approximate=true lets Redis trim on segment boundaries, which is much cheaper.
+	streamMaxLen = 10000
 )
 
 // Config holds connection and identity settings for a Stream instance.
@@ -77,6 +81,11 @@ func (s *Stream) Publish(ctx context.Context, queue string, payload []byte) (str
 		// "*" lets Redis auto-generate a monotonic ID (timestamp-sequence).
 		ID:     "*",
 		Values: map[string]any{"data": string(payload)},
+		// Cap retained entries so XACK'd messages eventually drop off. Without
+		// this Redis Streams grow forever (XACK only frees the PEL slot; the
+		// entry stays in the stream until trimmed).
+		MaxLen: streamMaxLen,
+		Approx: true,
 	}).Result()
 	if err != nil {
 		return "", fmt.Errorf("mqredis: XADD %s: %w", queue, err)

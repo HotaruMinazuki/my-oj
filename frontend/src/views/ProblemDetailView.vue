@@ -259,7 +259,7 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   font-weight: 700; margin: 1em 0 .5em;
 }
 .markdown-body :deep(pre) {
-  background: #f5f7fa;
+  background: var(--oj-bg);
   border: 1px solid var(--oj-border);
   padding: 12px;
   border-radius: var(--oj-radius);
@@ -268,7 +268,7 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 }
 .markdown-body :deep(code) {
   font-family: ui-monospace, 'Cascadia Code', monospace;
-  background: #f5f7fa;
+  background: var(--oj-bg);
   padding: 2px 5px;
   border-radius: 3px;
   font-size: 13px;

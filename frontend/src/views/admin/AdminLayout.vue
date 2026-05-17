@@ -27,5 +27,5 @@
 .admin-wrap   { min-height: 100vh; }
 .admin-aside  { background: #1d2129; }
 .aside-title  { color: #fff; font-size: 16px; font-weight: 700; padding: 20px 20px 12px; letter-spacing: 1px; }
-.admin-main   { background: #f5f7fa; padding: 24px; }
+.admin-main   { background: var(--oj-bg); padding: 24px; }
 </style>

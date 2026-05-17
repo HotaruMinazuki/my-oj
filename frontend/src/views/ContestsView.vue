@@ -174,9 +174,9 @@ onMounted(fetchContests)
   margin-right: 4px;
   background: var(--oj-text-3);
 }
-.status-dot.running, .status-dot.frozen { background: #67c23a; animation: blink 1.4s infinite; }
-.status-dot.ready   { background: #409eff; }
-.status-dot.ended   { background: #c0c4cc; }
+.status-dot.running, .status-dot.frozen { background: var(--oj-success); animation: blink 1.4s infinite; }
+.status-dot.ready   { background: var(--oj-primary); }
+.status-dot.ended   { background: var(--oj-text-3); }
 @keyframes blink { 50% { opacity: .3 } }
 
 .cc-title { display: block; font-size: 16px; font-weight: 600; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -184,11 +184,19 @@ onMounted(fetchContests)
 .sep { color: var(--oj-border); }
 
 .cc-countdown { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 13px; }
-.ready-cd   { color: #409eff; }
+.ready-cd   { color: var(--oj-primary); }
 .running-cd { color: var(--oj-success); }
 .cc-countdown :deep(.cd-value) { margin-left: 2px; font-variant-numeric: tabular-nums; }
 
 .cc-right { flex-shrink: 0; }
 
 .pagination { display: flex; justify-content: center; margin-top: 24px; }
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .cc-body { flex-direction: column; align-items: stretch; gap: 12px; }
+  .cc-right { align-self: flex-end; }
+  .pg-title { font-size: 20px; }
+  .cc-title { white-space: normal; }
+}
 </style>

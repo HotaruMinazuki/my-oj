@@ -45,6 +45,7 @@ func main() {
 	workers        := flag.Int("workers",          2,                              "concurrent judging workers")
 	nsjailBin      := flag.String("nsjail",        "/usr/local/bin/nsjail",        "path to nsjail binary")
 	seccompPolicy  := flag.String("seccomp",       "configs/seccomp/default.bpf", "seccomp BPF policy path")
+	cgroupMode     := flag.String("cgroup",        "auto",                         "cgroup version: auto|v1|v2")
 	flag.Parse()
 
 	log := buildLogger()
@@ -86,12 +87,34 @@ func main() {
 	defer stream.Close()
 	log.Info("connected to Redis", zap.String("addr", *redisAddr))
 
+	// ── Detect cgroup version ─────────────────────────────────────────────────
+	// On hosts running cgroup v1 (older kernels, some cloud images), hardcoding
+	// v2 makes nsjail fail with "cannot mount cgroup". Probe the unified hierarchy
+	// marker — /sys/fs/cgroup/cgroup.controllers only exists under v2.
+	cgroupV2 := true
+	switch *cgroupMode {
+	case "v1":
+		cgroupV2 = false
+	case "v2":
+		cgroupV2 = true
+	case "auto", "":
+		if _, statErr := os.Stat("/sys/fs/cgroup/cgroup.controllers"); statErr != nil {
+			cgroupV2 = false
+			log.Warn("cgroup v2 not detected; falling back to v1",
+				zap.String("probe", "/sys/fs/cgroup/cgroup.controllers"),
+				zap.Error(statErr))
+		}
+	default:
+		log.Fatal("invalid -cgroup value", zap.String("got", *cgroupMode))
+	}
+	log.Info("cgroup mode resolved", zap.Bool("v2", cgroupV2))
+
 	// ── Build nsjail sandbox ──────────────────────────────────────────────────
 	sb, err := nsjailsandbox.New(nsjailsandbox.Config{
 		BinaryPath:        *nsjailBin,
 		SeccompPolicyPath: *seccompPolicy,
 		CgroupParent:      "oj-judge",
-		CgroupV2:          true,
+		CgroupV2:          cgroupV2,
 	}, log)
 	if err != nil {
 		log.Fatal("nsjail init", zap.Error(err))

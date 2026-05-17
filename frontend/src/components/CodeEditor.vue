@@ -234,7 +234,7 @@ defineExpose({ clearDraft, focus: () => editor?.focus() })
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #67c23a;
+  color: var(--oj-success);
   margin-right: 8px;
 }
 .ce-font-size {
@@ -254,7 +254,7 @@ defineExpose({ clearDraft, focus: () => editor?.focus() })
 }
 .code-editor-hint {
   padding: 6px 10px;
-  background: #f5f7fa;
+  background: var(--oj-bg);
   border-top: 1px solid var(--oj-border);
   font-size: 12px;
   color: var(--oj-text-3);

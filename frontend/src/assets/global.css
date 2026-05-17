@@ -82,14 +82,47 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--oj-border) !important;
   border-radius: var(--oj-radius-lg) !important;
   box-shadow: var(--oj-shadow-sm) !important;
+  transition: box-shadow .18s ease, transform .18s ease;
+}
+.el-card.is-hover-shadow:hover,
+.el-card.is-always-shadow:hover {
+  box-shadow: var(--oj-shadow) !important;
 }
 .el-button--primary { box-shadow: 0 2px 6px rgba(64,158,255,.18); }
 
 /* Keep table cells vertically compact */
 .el-table td, .el-table th { padding: 10px 8px !important; }
+/* Slightly darker header for visual hierarchy */
+.el-table th.el-table__cell {
+  background: var(--oj-bg) !important;
+  color: var(--oj-text-2) !important;
+  font-weight: 600 !important;
+}
+/* Subtle hover row background; Element Plus default is too pale on stripe rows */
+.el-table tbody tr:hover > td.el-table__cell {
+  background: #f0f5ff !important;
+}
+
+/* Form labels share text-2 by default so they stay readable on busy pages */
+.el-form-item__label { color: var(--oj-text-2) !important; }
+
+/* Pagination active page should always pop */
+.el-pagination.is-background .el-pager li.is-active {
+  background-color: var(--oj-primary) !important;
+}
+
+/* Standardize page section headings */
+.page > h2,
+.page > .pg-head h2 { line-height: 1.3; }
 
 /* ─── Responsive helpers ───────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .hide-on-mobile { display: none !important; }
   .page { padding: 16px 12px; }
+  .el-card { border-radius: var(--oj-radius) !important; }
+  .el-dialog { width: 92vw !important; }
+}
+@media (max-width: 480px) {
+  .page { padding: 12px 10px; }
+  .el-table td, .el-table th { padding: 8px 4px !important; font-size: 12px; }
 }

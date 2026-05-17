@@ -275,16 +275,16 @@ onMounted(() => { fetchContest(); fetchProblems() })
   background: var(--oj-text-3);
   vertical-align: middle;
 }
-.status-dot.running, .status-dot.frozen { background: #67c23a; animation: blink 1.4s infinite; }
-.status-dot.ready   { background: #409eff; }
-.status-dot.ended   { background: #c0c4cc; }
+.status-dot.running, .status-dot.frozen { background: var(--oj-success); animation: blink 1.4s infinite; }
+.status-dot.ready   { background: var(--oj-primary); }
+.status-dot.ended   { background: var(--oj-text-3); }
 @keyframes blink { 50% { opacity: .3 } }
 
 .ch-meta { display: flex; flex-wrap: wrap; gap: 16px; color: var(--oj-text-3); font-size: 13px; margin-bottom: 10px; }
 .meta-item { display: flex; align-items: center; gap: 4px; }
 
 .ch-countdown { display: flex; align-items: center; gap: 6px; font-size: 14px; margin-top: 4px; }
-.ch-countdown.ready   { color: #409eff; }
+.ch-countdown.ready   { color: var(--oj-primary); }
 .ch-countdown.running { color: var(--oj-success); }
 .ch-countdown.ended   { color: var(--oj-text-3); }
 .cd-val { font-variant-numeric: tabular-nums; letter-spacing: .5px; }
@@ -317,4 +317,12 @@ onMounted(() => { fetchContest(); fetchProblems() })
   margin-bottom: 12px;
 }
 .dialog-lang-label { color: var(--oj-text-2); font-size: 14px; white-space: nowrap; }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .ch-body    { flex-direction: column; align-items: stretch; gap: 16px; }
+  .ch-actions { flex-direction: row; align-items: stretch; justify-content: flex-start; }
+  .ch-actions > * { flex: 1; }
+  .ch-title   { font-size: 18px; }
+}
 </style>

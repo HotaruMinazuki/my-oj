@@ -212,11 +212,11 @@ onBeforeUnmount(() => {
   width: 6px; height: 6px;
   border-radius: 50%;
   margin-right: 4px;
-  background: #909399;
+  background: var(--oj-info);
 }
-.ws-dot.open       { background: #67c23a; }
-.ws-dot.connecting { background: #e6a23c; animation: blink 1s infinite; }
-.ws-dot.closed     { background: #f56c6c; }
+.ws-dot.open       { background: var(--oj-success); }
+.ws-dot.connecting { background: var(--oj-warning); animation: blink 1s infinite; }
+.ws-dot.closed     { background: var(--oj-danger); }
 @keyframes blink { 50% { opacity: 0 } }
 .ws-tag { border-radius: 12px; }
 
@@ -258,5 +258,5 @@ onBeforeUnmount(() => {
 :deep(.rank-gold td)   { background: #fffbe6 !important; }
 :deep(.rank-silver td) { background: #f8f8f8 !important; }
 :deep(.rank-bronze td) { background: #fff6ef !important; }
-:deep(.rank-me td)     { background: #ecf5ff !important; outline: 2px solid #409eff; outline-offset: -2px; }
+:deep(.rank-me td)     { background: #ecf5ff !important; outline: 2px solid var(--oj-primary); outline-offset: -2px; }
 </style>
