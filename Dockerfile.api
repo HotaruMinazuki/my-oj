@@ -2,12 +2,16 @@
 FROM golang:1.22-alpine AS builder
 
 WORKDIR /src
-COPY go.mod go.sum ./
-# ↓↓↓ 在 RUN go mod download 这一行之前，插入下面这行 ↓↓↓
+RUN apk add --no-cache git
 RUN go env -w GOPROXY=https://goproxy.cn,direct
-RUN go mod download
+
+# 仓库不跟踪 go.sum, 只复制 go.mod, go mod tidy 会重建 go.sum
+COPY go.mod ./
 
 COPY . .
+# 自动补齐 go.mod 中缺失的 indirect 依赖并生成 go.sum
+RUN go mod tidy
+
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" \
     -o /out/api-server ./cmd/api-server
