@@ -34,6 +34,23 @@ const router = createRouter({
   ]
 })
 
+// 部署后浏览器若仍持有旧 index.html，懒加载路由会去取已不存在的旧 chunk
+// （404），vue-router 静默放弃导航，表现为菜单"点不开"。此时强制整页刷新，
+// 用新 index.html 重新进入目标路由即可自愈。sessionStorage 防无限刷新。
+router.onError((error, to) => {
+  const msg = String((error as Error)?.message ?? '')
+  if (/dynamically imported module|module script failed/i.test(msg)) {
+    if (!sessionStorage.getItem('oj-chunk-reload')) {
+      sessionStorage.setItem('oj-chunk-reload', '1')
+      window.location.href = to.fullPath
+    }
+  }
+})
+
+router.afterEach(() => {
+  sessionStorage.removeItem('oj-chunk-reload')
+})
+
 router.beforeEach((to, _from, next) => {
   const auth = useAuthStore()
   if (to.meta.requiresAuth && !auth.isLoggedIn) {
