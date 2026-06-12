@@ -65,16 +65,34 @@
                   登录后提交
                 </el-button>
               </el-tooltip>
-              <el-button
-                v-else
-                type="primary"
-                size="large"
-                :loading="submitting"
-                style="flex:1"
-                @click="handleSubmit"
-              >
-                提交代码
-              </el-button>
+              <template v-else>
+                <el-button
+                  type="primary"
+                  size="large"
+                  :loading="submitting"
+                  style="flex:1"
+                  @click="handleSubmit"
+                >
+                  提交代码
+                </el-button>
+                <el-tooltip content="选择源码文件,读取后立即提交评测" placement="top">
+                  <el-button
+                    size="large"
+                    :icon="UploadIcon"
+                    :loading="submitting"
+                    @click="fileInput?.click()"
+                  >
+                    文件提交
+                  </el-button>
+                </el-tooltip>
+                <input
+                  ref="fileInput"
+                  type="file"
+                  :accept="SOURCE_ACCEPT"
+                  style="display:none"
+                  @change="onFilePicked"
+                >
+              </template>
             </div>
 
             <!-- Last submission status -->
@@ -117,13 +135,14 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Timer, Loading, CircleCheck, CircleClose, WarningFilled } from '@element-plus/icons-vue'
+import { Timer, Loading, CircleCheck, CircleClose, WarningFilled, Upload as UploadIcon } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import { problemApi, submissionApi } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { TERMINAL_STATUSES } from '@/types'
 import type { Problem, Submission } from '@/types'
 import CodeEditor from '@/components/CodeEditor.vue'
+import { readSourceFile, SOURCE_ACCEPT } from '@/utils/sourceFile'
 
 // 与 configs/languages.yaml 保持一致 — 判题镜像目前只装了 gcc/g++/python3。
 const LANGS = ['C++17', 'C++20', 'C', 'Python3']
@@ -161,6 +180,27 @@ async function fetchProblem() {
     problem.value = await problemApi.get(Number(route.params.id))
   } finally {
     loading.value = false
+  }
+}
+
+const fileInput = ref<HTMLInputElement | null>(null)
+
+// 文件方式提交:读取本地源码文件 → 按扩展名切换语言 → 载入编辑器 → 立即提交评测。
+async function onFilePicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 允许下次选择同一文件时仍触发 change
+  if (!file) return
+  try {
+    const { code: content, language, filename } = await readSourceFile(file)
+    if (language && availableLangs.value.includes(language)) {
+      lang.value = language
+    }
+    code.value = content
+    ElMessage.success(`已读取 ${filename},提交评测中…`)
+    await handleSubmit()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '读取文件失败')
   }
 }
 

@@ -127,10 +127,24 @@
           @submit="handleSubmit"
         />
         <template #footer>
-          <el-button @click="submitVisible = false">取消</el-button>
-          <el-button type="primary" :loading="submitting" @click="handleSubmit">
-            提交 <kbd style="font-size:11px;margin-left:4px;opacity:.7">Ctrl+↵</kbd>
-          </el-button>
+          <div class="dialog-footer">
+            <el-button :icon="UploadIcon" :loading="submitting" @click="fileInput?.click()">
+              文件提交
+            </el-button>
+            <input
+              ref="fileInput"
+              type="file"
+              :accept="SOURCE_ACCEPT"
+              style="display:none"
+              @change="onFilePicked"
+            >
+            <div class="dialog-footer-right">
+              <el-button @click="submitVisible = false">取消</el-button>
+              <el-button type="primary" :loading="submitting" @click="handleSubmit">
+                提交 <kbd style="font-size:11px;margin-left:4px;opacity:.7">Ctrl+↵</kbd>
+              </el-button>
+            </div>
+          </div>
         </template>
       </el-dialog>
     </template>
@@ -143,7 +157,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  Clock, Lock, Timer, CircleCheck, Histogram, DocumentCopy,
+  Clock, Lock, Timer, CircleCheck, Histogram, DocumentCopy, Upload as UploadIcon,
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { contestApi, submissionApi } from '@/api/http'
@@ -151,6 +165,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useCountdown } from '@/composables/useCountdown'
 import type { Contest, ContestProblemSummary } from '@/types'
 import CodeEditor from '@/components/CodeEditor.vue'
+import { readSourceFile, SOURCE_ACCEPT } from '@/utils/sourceFile'
 
 // 与 configs/languages.yaml 保持一致 — 判题镜像目前只装了 gcc/g++/python3。
 const LANGS = ['C++17', 'C++20', 'C', 'Python3']
@@ -228,6 +243,27 @@ function openSubmit(row: ContestProblemSummary) {
   submitCode.value    = ''
   submitLang.value    = 'C++17'
   submitVisible.value = true
+}
+
+const fileInput = ref<HTMLInputElement | null>(null)
+
+// 文件方式提交:读取本地源码文件 → 按扩展名切换语言 → 立即提交评测。
+async function onFilePicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    const { code: content, language, filename } = await readSourceFile(file)
+    if (language && LANGS.includes(language)) {
+      submitLang.value = language
+    }
+    submitCode.value = content
+    ElMessage.success(`已读取 ${filename},提交评测中…`)
+    await handleSubmit()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '读取文件失败')
+  }
 }
 
 async function handleSubmit() {
@@ -311,6 +347,14 @@ onMounted(() => { fetchContest(); fetchProblems() })
 }
 
 /* ── Submit dialog ── */
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dialog-footer-right { display: flex; gap: 12px; }
+
 .dialog-lang-row {
   display: flex;
   align-items: center;
