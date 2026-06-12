@@ -140,6 +140,10 @@ services:
       minio-init:
         condition: service_completed_successfully
     privileged: true
+    # nsjail 在宿主 cgroup 根下创建 NSJAIL.<pid> 并把进程 attach 进去;
+    # 默认的私有 cgroup namespace 下 attach 会被内核以 ENOENT 拒绝
+    # (目标 cgroup 在本容器 namespace 根之外), 必须用宿主 cgroup ns。
+    cgroup: host
     security_opt:
       - seccomp:unconfined
     command:

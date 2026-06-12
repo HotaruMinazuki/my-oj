@@ -19,7 +19,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -109,20 +111,21 @@ func main() {
 	}
 	log.Info("cgroup mode resolved", zap.Bool("v2", cgroupV2))
 
-	// Probe whether nsjail will actually be able to create per-task cgroups.
-	// nsjail treats cgroup setup failure as fatal for the execution, so an
-	// unwritable hierarchy (e.g., container without sufficient privileges)
-	// would otherwise fail EVERY submission. Degrade to rlimit-only enforcement
-	// instead, loudly.
+	// Probe whether nsjail will actually be able to use per-task cgroups.
+	// Creating the directory is NOT enough: with a private cgroup namespace
+	// (docker's default) the bind-mounted host hierarchy is visible and mkdir
+	// succeeds, but ATTACHING a process to a cgroup outside the container's
+	// namespace root fails with ENOENT — and nsjail treats that as fatal for
+	// every execution. Probe the real operation with a throwaway child process;
+	// degrade to rlimit-only enforcement instead of failing every submission.
 	disableCgroup := false
 	if cgroupV2 {
-		probeDir := "/sys/fs/cgroup/oj-judge-probe"
-		if err := os.Mkdir(probeDir, 0o755); err != nil && !os.IsExist(err) {
+		if err := probeCgroupAttach("/sys/fs/cgroup/oj-judge-probe"); err != nil {
 			disableCgroup = true
-			log.Warn("cgroup v2 hierarchy not writable; disabling cgroup limits "+
-				"(memory/pids fall back to rlimits)", zap.Error(err))
-		} else {
-			_ = os.Remove(probeDir)
+			log.Warn("cgroup v2 attach probe failed; disabling cgroup limits "+
+				"(memory/pids fall back to rlimits). For full limits run the "+
+				"judger container in the host cgroup namespace (compose: cgroup: host)",
+				zap.Error(err))
 		}
 	}
 
@@ -191,6 +194,31 @@ func main() {
 	}
 
 	log.Info("judger node shut down cleanly")
+}
+
+// probeCgroupAttach verifies a process can actually be moved into a freshly
+// created cgroup — the operation nsjail performs for every execution.
+// A short-lived child is attached and then killed; the probe cgroup is removed.
+func probeCgroupAttach(dir string) error {
+	if err := os.Mkdir(dir, 0o755); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	defer os.Remove(dir) //nolint:errcheck
+
+	child := exec.Command("/bin/sleep", "30")
+	if err := child.Start(); err != nil {
+		return fmt.Errorf("start probe child: %w", err)
+	}
+	defer func() {
+		_ = child.Process.Kill()
+		_ = child.Wait()
+	}()
+
+	pid := []byte(strconv.Itoa(child.Process.Pid))
+	if err := os.WriteFile(dir+"/cgroup.procs", pid, 0); err != nil {
+		return fmt.Errorf("attach pid to %s/cgroup.procs: %w", dir, err)
+	}
+	return nil
 }
 
 func buildLogger() *zap.Logger {
