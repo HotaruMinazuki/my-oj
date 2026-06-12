@@ -30,6 +30,7 @@ type SubmissionRepo interface {
 // ProblemRepo is the subset of problem queries needed for submission validation.
 type ProblemRepo interface {
 	GetJudgeConfig(ctx context.Context, problemID models.ID) (*models.JudgeConfig, error)
+	GetJudgeMeta(ctx context.Context, problemID models.ID) (*models.ProblemJudgeMeta, error)
 	GetTestCases(ctx context.Context, problemID models.ID) ([]models.JudgeTestCase, error)
 }
 
@@ -92,7 +93,7 @@ func (h *SubmissionHandler) Submit(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	cfg, testCases, ok := h.loadProblemMeta(c, ctx, req.ProblemID)
+	cfg, meta, testCases, ok := h.loadProblemMeta(c, ctx, req.ProblemID)
 	if !ok {
 		return
 	}
@@ -118,7 +119,7 @@ func (h *SubmissionHandler) Submit(c *gin.Context) {
 		return
 	}
 
-	h.enqueueTask(c, ctx, sub, userID, &contestID, cfg, testCases, sourceKey)
+	h.enqueueTask(c, ctx, sub, userID, &contestID, cfg, meta, testCases, sourceKey)
 }
 
 // ─── POST /api/v1/submissions (out-of-contest practice) ──────────────────────
@@ -137,7 +138,7 @@ func (h *SubmissionHandler) SubmitPractice(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	cfg, testCases, ok := h.loadProblemMeta(c, ctx, req.ProblemID)
+	cfg, meta, testCases, ok := h.loadProblemMeta(c, ctx, req.ProblemID)
 	if !ok {
 		return
 	}
@@ -162,7 +163,7 @@ func (h *SubmissionHandler) SubmitPractice(c *gin.Context) {
 		return
 	}
 
-	h.enqueueTask(c, ctx, sub, userID, nil, cfg, testCases, sourceKey)
+	h.enqueueTask(c, ctx, sub, userID, nil, cfg, meta, testCases, sourceKey)
 }
 
 // ─── GET /api/v1/submissions/:id ─────────────────────────────────────────────
@@ -207,20 +208,26 @@ func (h *SubmissionHandler) loadProblemMeta(
 	c *gin.Context,
 	ctx context.Context,
 	problemID models.ID,
-) (*models.JudgeConfig, []models.JudgeTestCase, bool) {
+) (*models.JudgeConfig, *models.ProblemJudgeMeta, []models.JudgeTestCase, bool) {
 	cfg, err := h.problems.GetJudgeConfig(ctx, problemID)
 	if err != nil {
 		h.log.Error("get judge config", zap.Error(err), zap.Int64("problem_id", problemID))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load problem config"})
-		return nil, nil, false
+		return nil, nil, nil, false
+	}
+	meta, err := h.problems.GetJudgeMeta(ctx, problemID)
+	if err != nil {
+		h.log.Error("get judge meta", zap.Error(err), zap.Int64("problem_id", problemID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load problem metadata"})
+		return nil, nil, nil, false
 	}
 	testCases, err := h.problems.GetTestCases(ctx, problemID)
 	if err != nil {
 		h.log.Error("get test cases", zap.Error(err), zap.Int64("problem_id", problemID))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load test cases"})
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	return cfg, testCases, true
+	return cfg, meta, testCases, true
 }
 
 // uploadSource uploads the source code to MinIO and returns the object key.
@@ -260,6 +267,7 @@ func (h *SubmissionHandler) enqueueTask(
 	userID models.ID,
 	contestID *models.ID,
 	cfg *models.JudgeConfig,
+	meta *models.ProblemJudgeMeta,
 	testCases []models.JudgeTestCase,
 	sourceKey string,
 ) {
@@ -272,7 +280,10 @@ func (h *SubmissionHandler) enqueueTask(
 			ContestID:      contestID,
 			Language:       sub.Language,
 			SourceCodePath: sourceKey, // MinIO key; judger downloads via ObjectStore
+			JudgeType:      meta.JudgeType,
 			JudgeConfig:    *cfg,
+			TimeLimitMs:    meta.TimeLimitMs,
+			MemLimitKB:     meta.MemLimitKB,
 			TestCases:      testCases,
 		},
 		EnqueuedAt: time.Now().UTC(),

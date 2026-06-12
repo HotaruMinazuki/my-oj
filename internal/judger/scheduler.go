@@ -243,6 +243,17 @@ func (s *Scheduler) runStateMachine(ctx context.Context, log *zap.Logger, task *
 
 	log.Info("compile OK", zap.Strings("run_cmd", compileResult.RunCmd))
 
+	// ── Apply language time multiplier before Stage 2 ──
+	// Python (3x), Java (2x), etc. need more CPU time than C++ for the same problem.
+	multiplier := s.compiler.TimeLimitMultiplier(task.Language)
+	if multiplier != 1.0 && multiplier > 0 {
+		task.TimeLimitMs = int64(float64(task.TimeLimitMs) * multiplier)
+		log.Info("time limit adjusted",
+			zap.Float64("multiplier", multiplier),
+			zap.Int64("adjusted_time_limit_ms", task.TimeLimitMs),
+		)
+	}
+
 	// ── Stage 2: JUDGING ──────────────────────────────────────────────────────
 	log.Info("stage: JUDGING", zap.Int("test_cases", len(task.TestCases)))
 

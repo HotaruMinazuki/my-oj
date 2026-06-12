@@ -94,3 +94,21 @@ ORDER  BY group_id, ordinal`
 	}
 	return out, nil
 }
+
+// GetJudgeMeta fetches the judging metadata (judge_type, time_limit_ms, mem_limit_kb)
+// for a problem. These come from separate columns vs. the JSONB judge_config.
+func (r *ProblemRepo) GetJudgeMeta(ctx context.Context, problemID models.ID) (*models.ProblemJudgeMeta, error) {
+	const q = SELECT judge_type, time_limit_ms, mem_limit_kb FROM problems WHERE id = 
+
+	var meta models.ProblemJudgeMeta
+	var judgeTypeStr string
+	err := r.db.QueryRowContext(ctx, q, problemID).Scan(&judgeTypeStr, &meta.TimeLimitMs, &meta.MemLimitKB)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("problem %d not found", problemID)
+		}
+		return nil, fmt.Errorf("query judge meta for problem %d: %w", problemID, err)
+	}
+	meta.JudgeType = models.JudgeType(judgeTypeStr)
+	return &meta, nil
+}

@@ -44,6 +44,16 @@ func NewCompiler(cfgs []LangConfig, store storage.ObjectStore) *Compiler {
 	return &Compiler{configs: m, store: store}
 }
 
+// TimeLimitMultiplier returns the time-limit multiplier for a given language.
+// Returns 1.0 if the language is not configured (safe default).
+func (c *Compiler) TimeLimitMultiplier(lang models.Language) float64 {
+	cfg, ok := c.configs[lang]
+	if !ok {
+		return 1.0
+	}
+	return cfg.TimeLimitMultiplier
+}
+
 // Compile is Stage 1 of the judge pipeline.
 //
 //  1. Downloads the source from MinIO (BucketSubmissions, key = sourceKey)
