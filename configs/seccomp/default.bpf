@@ -5,7 +5,7 @@ POLICY oj_default {
                 getsockname, getpeername, setsockopt, getsockopt, shutdown,
                 ptrace, process_vm_readv, process_vm_writev,
                 perf_event_open, bpf,
-                mount, umount2, pivot_root, chroot, setns, unshare,
+                mount, umount, pivot_root, chroot, setns, unshare,
                 reboot, swapon, swapoff,
                 init_module, finit_module, delete_module,
                 kexec_load, kexec_file_load,
