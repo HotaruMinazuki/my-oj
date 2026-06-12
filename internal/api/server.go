@@ -46,6 +46,7 @@ func NewServer(
 	submissions handler.SubmissionRepo,
 	problems handler.ProblemRepo,
 	problemList handler.ProblemListRepo,
+	testcases handler.TestcaseAdminRepo,
 	users handler.AuthUserRepo,
 	contests handler.ContestCRUDRepo,
 	log *zap.Logger,
@@ -87,7 +88,7 @@ func NewServer(
 	// ── Handlers ───────────────────────────────────────────────────────────────
 	rankingH    := handler.NewRankingHandler(hub, rdb, log)
 	submissionH := handler.NewSubmissionHandler(submissions, problems, publisher, store, log)
-	adminH      := handler.NewAdminHandler(rankingService, store, log)
+	adminH      := handler.NewAdminHandler(rankingService, store, testcases, log)
 	authH       := handler.NewAuthHandler(users, cfg.JWTSigningKey, log)
 	problemH    := handler.NewProblemHandler(problemList, log)
 	contestH    := handler.NewContestHandler(contests, log)

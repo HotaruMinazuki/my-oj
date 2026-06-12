@@ -2,11 +2,12 @@ package handler
 
 import (
 	"archive/zip"
-	"bytes"
+	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -26,19 +27,29 @@ const (
 // zipMagic is the signature of a valid ZIP file.
 var zipMagic = []byte{'P', 'K', 0x03, 0x04}
 
+// TestcaseAdminRepo persists test-case metadata parsed from an uploaded zip.
+// Without these rows the API server builds JudgeTasks with zero test cases and
+// every submission ends in SystemError, so the upload endpoint must keep the
+// DB in sync with the zip stored in MinIO.
+type TestcaseAdminRepo interface {
+	ReplaceTestCases(ctx context.Context, problemID models.ID, cases []models.JudgeTestCase) error
+}
+
 // AdminHandler exposes privileged contest- and problem-management endpoints.
 type AdminHandler struct {
 	rankingService *ranking.RankingService
 	store          storage.ObjectStore
+	testcases      TestcaseAdminRepo
 	log            *zap.Logger
 }
 
 func NewAdminHandler(
 	rankingService *ranking.RankingService,
 	store storage.ObjectStore,
+	testcases TestcaseAdminRepo,
 	log *zap.Logger,
 ) *AdminHandler {
-	return &AdminHandler{rankingService: rankingService, store: store, log: log}
+	return &AdminHandler{rankingService: rankingService, store: store, testcases: testcases, log: log}
 }
 
 // ─── POST /api/v1/admin/contests/:contest_id/unfreeze-next ───────────────────
@@ -123,12 +134,27 @@ func (h *AdminHandler) UploadTestcases(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file is not a valid ZIP archive"})
 		return
 	}
-	// Seek back to the beginning so the full file can be uploaded.
-	if seeker, ok := f.(interface{ Seek(int64, int) (int64, error) }); ok {
-		if _, err := seeker.Seek(0, 0); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "seek error"})
-			return
-		}
+	if _, err := f.Seek(0, 0); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "seek error"})
+		return
+	}
+
+	// ── Parse entries BEFORE upload so a malformed zip is rejected outright ───
+	// multipart.File implements io.ReaderAt, so no extra buffering is needed.
+	zr, err := zip.NewReader(f, fh.Size)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("cannot parse zip: %v", err)})
+		return
+	}
+	cases, files, warns, parseErr := parseTestcaseEntries(zr)
+	if parseErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": parseErr.Error(), "files": files})
+		return
+	}
+
+	if _, err := f.Seek(0, 0); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "seek error"})
+		return
 	}
 
 	// ── Upload to MinIO ───────────────────────────────────────────────────────
@@ -142,72 +168,89 @@ func (h *AdminHandler) UploadTestcases(c *gin.Context) {
 		return
 	}
 
-	// ── Validate the zip contents by scanning the uploaded object ─────────────
-	// We re-open from MinIO for listing so we don't buffer the whole file in RAM.
-	rc, err := h.store.Get(ctx, storage.BucketTestcases, key)
-	if err != nil {
-		// Upload succeeded but we can't verify — that's OK; just skip the listing.
-		c.JSON(http.StatusCreated, gin.H{
-			"key":     key,
-			"size":    fh.Size,
-			"warning": "uploaded but could not list zip contents",
+	// ── Sync test-case rows into the DB ───────────────────────────────────────
+	// The submission flow loads test cases from the DB to build the JudgeTask;
+	// without these rows nothing would be judged.
+	if err := h.testcases.ReplaceTestCases(ctx, problemID, cases); err != nil {
+		h.log.Error("replace test cases", zap.Error(err), zap.Int64("problem_id", problemID))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "zip stored but registering test cases in DB failed; re-upload to retry",
 		})
 		return
 	}
-	defer rc.Close()
 
-	files, warns := listZipContents(rc, fh.Size)
 	c.JSON(http.StatusCreated, gin.H{
-		"key":      key,
-		"size":     fh.Size,
-		"files":    files,
-		"warnings": warns,
+		"key":        key,
+		"size":       fh.Size,
+		"files":      files,
+		"test_cases": len(cases),
+		"warnings":   warns,
 	})
 }
 
-// listZipContents reads rc into memory (capped at 32 MB), then lists filenames
-// in the zip and warns about missing .out counterparts.
-// Large zips skip the listing and return a warning instead.
-func listZipContents(rc io.Reader, size int64) (files []string, warns []string) {
-	const listSizeLimit = 32 * 1024 * 1024 // 32 MB in-memory cap for listing
-	if size > listSizeLimit {
-		return nil, []string{"zip content listing skipped (file > 32 MB); upload succeeded"}
-	}
+var (
+	tcInRe  = regexp.MustCompile(`^(\d+)\.in$`)
+	tcOutRe = regexp.MustCompile(`^(\d+)\.out$`)
+)
 
-	buf, err := io.ReadAll(io.LimitReader(rc, listSizeLimit+1))
-	if err != nil {
-		return nil, []string{fmt.Sprintf("read zip for listing: %v", err)}
-	}
+// parseTestcaseEntries maps zip entries (flat layout: "1.in", "1.out", ...) to
+// JudgeTestCase rows. Per-case score is an equal share of 100 (remainder goes
+// to the last case) so OI/IOI scoring works without per-case configuration.
+func parseTestcaseEntries(zr *zip.Reader) (cases []models.JudgeTestCase, files, warns []string, err error) {
+	ins := map[int]string{}
+	outs := map[int]string{}
 
-	// bytes.NewReader implements io.ReaderAt, which zip.NewReader requires.
-	r, err := zip.NewReader(bytes.NewReader(buf), int64(len(buf)))
-	if err != nil {
-		return nil, []string{fmt.Sprintf("zip parse error: %v", err)}
-	}
-
-	outSet := make(map[string]bool)
-	for _, f := range r.File {
-		if f.FileInfo().IsDir() {
+	for _, zf := range zr.File {
+		if zf.FileInfo().IsDir() {
 			continue
 		}
-		files = append(files, f.Name)
-		if strings.HasSuffix(f.Name, ".out") {
-			outSet[strings.TrimSuffix(f.Name, ".out")] = true
+		name := zf.Name
+		files = append(files, name)
+		if m := tcInRe.FindStringSubmatch(name); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			ins[n] = name
+		} else if m := tcOutRe.FindStringSubmatch(name); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			outs[n] = name
+		} else {
+			warns = append(warns, fmt.Sprintf("ignored entry %q (expected N.in / N.out at zip root)", name))
 		}
 	}
 
-	// Warn about .in files with no matching .out (OK for interactive problems).
-	for _, fname := range files {
-		if strings.HasSuffix(fname, ".in") {
-			base := strings.TrimSuffix(fname, ".in")
-			if !outSet[base] {
-				warns = append(warns, fmt.Sprintf(
-					"no matching .out for %s.in (expected for standard/special; OK for interactive)", fname))
-			}
+	if len(ins) == 0 {
+		return nil, files, warns, fmt.Errorf(
+			"no N.in entries found at zip root; layout must be flat: 1.in 1.out 2.in 2.out ...")
+	}
+
+	nums := make([]int, 0, len(ins))
+	for n := range ins {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+
+	base, rem := 100/len(nums), 100%len(nums)
+	for i, n := range nums {
+		outPath := outs[n]
+		if outPath == "" {
+			warns = append(warns, fmt.Sprintf(
+				"%d.in has no matching %d.out (required for standard/special judge; OK for interactive)", n, n))
+		}
+		score := base
+		if i == len(nums)-1 {
+			score += rem
+		}
+		cases = append(cases, models.JudgeTestCase{
+			GroupID:    1,
+			Ordinal:    n,
+			InputPath:  ins[n],
+			OutputPath: outPath,
+			Score:      score,
+		})
+	}
+	for n := range outs {
+		if _, ok := ins[n]; !ok {
+			warns = append(warns, fmt.Sprintf("%d.out has no matching %d.in; entry ignored", n, n))
 		}
 	}
-	if len(files) == 0 {
-		warns = append(warns, "zip is empty — no test cases found")
-	}
-	return files, warns
+	return cases, files, warns, nil
 }

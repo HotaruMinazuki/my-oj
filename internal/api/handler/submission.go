@@ -227,6 +227,14 @@ func (h *SubmissionHandler) loadProblemMeta(
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load test cases"})
 		return nil, nil, nil, false
 	}
+	// A task with zero test cases would be judged as SystemError; fail fast with
+	// an actionable message instead of polluting the queue.
+	if len(testCases) == 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error": "problem has no test data; ask an admin to (re-)upload the testcase zip",
+		})
+		return nil, nil, nil, false
+	}
 	return cfg, meta, testCases, true
 }
 

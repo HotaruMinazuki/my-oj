@@ -165,6 +165,7 @@ func main() {
 		submissionRepo,
 		problemRepo,
 		problemRepo,   // ProblemRepo also satisfies ProblemListRepo
+		problemRepo,   // ... and TestcaseAdminRepo
 		userRepo,
 		contestRepo,
 		log,

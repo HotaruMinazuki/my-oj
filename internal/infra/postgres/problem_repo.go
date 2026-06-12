@@ -95,10 +95,37 @@ ORDER  BY group_id, ordinal`
 	return out, nil
 }
 
+// ReplaceTestCases atomically replaces all test-case rows of a problem.
+// Called by the admin testcase-upload endpoint after the zip is stored in MinIO,
+// so the DB metadata always mirrors the latest uploaded archive.
+func (r *ProblemRepo) ReplaceTestCases(ctx context.Context, problemID models.ID, cases []models.JudgeTestCase) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM test_cases WHERE problem_id = $1`, problemID); err != nil {
+		return fmt.Errorf("delete old test cases for problem %d: %w", problemID, err)
+	}
+
+	const ins = `
+INSERT INTO test_cases (problem_id, group_id, ordinal, input_path, output_path, score, is_sample)
+VALUES ($1, $2, $3, $4, $5, $6, FALSE)`
+	for _, tc := range cases {
+		if _, err := tx.ExecContext(ctx, ins,
+			problemID, tc.GroupID, tc.Ordinal, tc.InputPath, tc.OutputPath, tc.Score,
+		); err != nil {
+			return fmt.Errorf("insert test case %d for problem %d: %w", tc.Ordinal, problemID, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // GetJudgeMeta fetches the judging metadata (judge_type, time_limit_ms, mem_limit_kb)
 // for a problem. These come from separate columns vs. the JSONB judge_config.
 func (r *ProblemRepo) GetJudgeMeta(ctx context.Context, problemID models.ID) (*models.ProblemJudgeMeta, error) {
-	const q = SELECT judge_type, time_limit_ms, mem_limit_kb FROM problems WHERE id = 
+	const q = `SELECT judge_type, time_limit_ms, mem_limit_kb FROM problems WHERE id = $1`
 
 	var meta models.ProblemJudgeMeta
 	var judgeTypeStr string
