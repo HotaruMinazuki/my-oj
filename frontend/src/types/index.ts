@@ -18,8 +18,10 @@ export interface User {
 export type Language =
   | 'C' | 'C++17' | 'C++20' | 'Java21' | 'Python3' | 'Go' | 'Rust'
 
+// 当前判题镜像实际可用的语言(与 configs/languages.yaml 一致)。
+// Java21/Go/Rust 需先在 Dockerfile.judger 安装运行时后才能恢复。
 export const ALL_LANGUAGES: Language[] = [
-  'C++17', 'C++20', 'C', 'Java21', 'Python3', 'Go', 'Rust',
+  'C++17', 'C++20', 'C', 'Python3',
 ]
 
 export type JudgeType = 'standard' | 'special' | 'interactive' | 'communication'

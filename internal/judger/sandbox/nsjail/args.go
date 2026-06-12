@@ -58,11 +58,19 @@ func buildBaseArgs(cfg *Config, scfg *sandbox.SessionConfig, limits sandbox.Reso
 	}
 
 	// ── Process / PID limits ─────────────────────────────────────────────────
-	if scfg.MaxProcesses > 0 {
+	// Effective cap = max(session ceiling, per-request child allowance).
+	// The compile stage legitimately needs dozens of processes (g++ forks
+	// cc1plus/as/ld) even though the contestant binary itself is capped at 1,
+	// so the per-request MaxChildProcesses must be able to raise the ceiling.
+	maxPids := scfg.MaxProcesses
+	if limits.MaxChildProcesses > maxPids {
+		maxPids = limits.MaxChildProcesses
+	}
+	if maxPids > 0 {
 		// cgroup pids.max prevents fork bombs from filling the PID table.
-		args = append(args, "--cgroup_pids_max", fmt.Sprintf("%d", scfg.MaxProcesses))
+		args = append(args, "--cgroup_pids_max", fmt.Sprintf("%d", maxPids))
 		// RLIMIT_NPROC backs this up at the per-process level.
-		args = append(args, "--rlimit_nproc", fmt.Sprintf("%d", scfg.MaxProcesses))
+		args = append(args, "--rlimit_nproc", fmt.Sprintf("%d", maxPids))
 	}
 
 	// ── File system limits ────────────────────────────────────────────────────
@@ -75,8 +83,15 @@ func buildBaseArgs(cfg *Config, scfg *sandbox.SessionConfig, limits sandbox.Reso
 		args = append(args, "--rlimit_nofile", fmt.Sprintf("%d", limits.MaxOpenFiles))
 	}
 
-	// ── cgroup parent ─────────────────────────────────────────────────────────
-	if cfg.CgroupParent != "" {
+	// ── cgroup backend ────────────────────────────────────────────────────────
+	// nsjail defaults to cgroup v1 controller paths (/sys/fs/cgroup/memory/...).
+	// On unified-hierarchy hosts (Ubuntu 22.04+) those paths don't exist, so every
+	// --cgroup_* option fails unless --use_cgroupv2 is passed. The *_parent flags
+	// are a v1-only concept; under v2 nsjail manages NSJAIL.<pid> sub-cgroups
+	// directly beneath the cgroupv2 mount.
+	if cfg.CgroupV2 {
+		args = append(args, "--use_cgroupv2")
+	} else if cfg.CgroupParent != "" {
 		args = append(args, "--cgroup_mem_parent", cfg.CgroupParent)
 		args = append(args, "--cgroup_pids_parent", cfg.CgroupParent)
 		args = append(args, "--cgroup_cpu_parent", cfg.CgroupParent)
@@ -111,6 +126,17 @@ func buildBaseArgs(cfg *Config, scfg *sandbox.SessionConfig, limits sandbox.Reso
 		}
 		args = append(args, flag, fmt.Sprintf("%s:%s", bm.HostPath, target))
 	}
+
+	// ── Environment ───────────────────────────────────────────────────────────
+	// nsjail clears the environment by default. Compilers and interpreters need
+	// a sane PATH for their subprograms, and a writable TMPDIR — the sandbox has
+	// no /tmp, /workspace is the only writable mount.
+	args = append(args,
+		"--env", "PATH=/usr/local/bin:/usr/bin:/bin",
+		"--env", "TMPDIR=/workspace",
+		"--env", "HOME=/workspace",
+		"--env", "LANG=C.UTF-8",
+	)
 
 	// ── Contestant workspace ──────────────────────────────────────────────────
 	// The session's WorkDir is bind-mounted read-write as /workspace.

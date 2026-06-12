@@ -1,45 +1,31 @@
+# 注意: nsjail 直接 execve 命令, 不做 PATH 查找, 所以编译器/解释器必须写绝对路径。
+# 运行时 cwd 是 /workspace(每个任务独立的可写挂载), 编译产物 ./main 位于其中。
+#
+# Java21 / Go / Rust 暂未启用: Dockerfile.judger 的运行时镜像没有安装
+# javac / go / rustc。要启用需先在镜像里 apt-get install
+# (openjdk-21-jdk-headless / golang-go / rustc), 再把条目加回来——命令同样必须是绝对路径。
 languages:
   - language: "C++17"
     source_file: "main.cpp"
-    compile_cmd: ["g++", "-std=c++17", "-O2", "-Wall", "-o", "main", "main.cpp"]
+    compile_cmd: ["/usr/bin/g++", "-std=c++17", "-O2", "-Wall", "-o", "main", "main.cpp"]
     run_cmd: ["./main"]
     time_limit_multiplier: 1.0
 
   - language: "C++20"
     source_file: "main.cpp"
-    compile_cmd: ["g++", "-std=c++20", "-O2", "-Wall", "-o", "main", "main.cpp"]
+    compile_cmd: ["/usr/bin/g++", "-std=c++20", "-O2", "-Wall", "-o", "main", "main.cpp"]
     run_cmd: ["./main"]
     time_limit_multiplier: 1.0
 
   - language: "C"
     source_file: "main.c"
-    compile_cmd: ["gcc", "-std=c17", "-O2", "-Wall", "-o", "main", "main.c", "-lm"]
+    compile_cmd: ["/usr/bin/gcc", "-std=c17", "-O2", "-Wall", "-o", "main", "main.c", "-lm"]
     run_cmd: ["./main"]
     time_limit_multiplier: 1.0
-
-  - language: "Java21"
-    source_file: "Main.java"
-    compile_cmd: ["javac", "-encoding", "UTF-8", "Main.java"]
-    # -Xss sets the stack size; -Xmx is the heap cap (enforced by JVM, not cgroup).
-    # The cgroup MemLimitKB must be set higher than -Xmx to account for JVM overhead.
-    run_cmd: ["java", "-Xss64m", "-Xmx512m", "-Xms32m", "Main"]
-    time_limit_multiplier: 2.0
 
   - language: "Python3"
     source_file: "main.py"
-    # py_compile performs a syntax check without executing the program.
-    compile_cmd: ["python3", "-m", "py_compile", "main.py"]
-    run_cmd: ["python3", "-u", "main.py"]
+    # py_compile 只做语法检查, 不执行程序。
+    compile_cmd: ["/usr/bin/python3", "-m", "py_compile", "main.py"]
+    run_cmd: ["/usr/bin/python3", "-u", "main.py"]
     time_limit_multiplier: 3.0
-
-  - language: "Go"
-    source_file: "main.go"
-    compile_cmd: ["go", "build", "-o", "main", "main.go"]
-    run_cmd: ["./main"]
-    time_limit_multiplier: 1.0
-
-  - language: "Rust"
-    source_file: "main.rs"
-    compile_cmd: ["rustc", "-O", "-o", "main", "main.rs"]
-    run_cmd: ["./main"]
-    time_limit_multiplier: 1.0

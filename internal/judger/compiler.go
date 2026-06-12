@@ -107,8 +107,11 @@ func (c *Compiler) Compile(
 		Limits: sandbox.ResourceLimits{
 			// No CPU time limit for compilation — wall time is the cap.
 			// javac/g++ can spend CPU in bursts; enforcing CPU limit causes false CEs.
-			WallTimeLimitMs:   compileWallTimeLimitMs,
-			MemLimitKB:        compileMemLimitKB,
+			WallTimeLimitMs: compileWallTimeLimitMs,
+			MemLimitKB:      compileMemLimitKB,
+			// nsjail's built-in rlimit_fsize default is 1 MB, which truncates
+			// linker output; binaries and intermediate objects need real room.
+			FileSizeKB:        256 * 1024,
 			MaxOpenFiles:      512,
 			MaxChildProcesses: 64, // compilers fork heavily (preprocessor, linker, asm)
 		},

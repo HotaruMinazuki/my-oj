@@ -125,7 +125,8 @@ import { TERMINAL_STATUSES } from '@/types'
 import type { Problem, Submission } from '@/types'
 import CodeEditor from '@/components/CodeEditor.vue'
 
-const LANGS = ['C++17', 'C++20', 'C', 'Java21', 'Python3', 'Go', 'Rust']
+// 与 configs/languages.yaml 保持一致 — 判题镜像目前只装了 gcc/g++/python3。
+const LANGS = ['C++17', 'C++20', 'C', 'Python3']
 
 const route  = useRoute()
 const auth   = useAuthStore()
