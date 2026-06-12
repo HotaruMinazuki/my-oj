@@ -41,15 +41,17 @@ func buildBaseArgs(cfg *Config, scfg *sandbox.SessionConfig, limits sandbox.Reso
 
 	// ── Memory limit ─────────────────────────────────────────────────────────
 	if limits.MemLimitKB > 0 {
-		memBytes := limits.MemLimitKB * 1024
-		if cfg.CgroupV2 {
-			args = append(args, "--cgroup_mem_max", fmt.Sprintf("%d", memBytes))
-		} else {
-			// cgroup v1: separate memory and memsw controllers.
-			args = append(args,
-				"--cgroup_mem_max", fmt.Sprintf("%d", memBytes),
-				"--cgroup_mem_memsw_max", fmt.Sprintf("%d", memBytes),
-			)
+		if !cfg.DisableCgroup {
+			memBytes := limits.MemLimitKB * 1024
+			if cfg.CgroupV2 {
+				args = append(args, "--cgroup_mem_max", fmt.Sprintf("%d", memBytes))
+			} else {
+				// cgroup v1: separate memory and memsw controllers.
+				args = append(args,
+					"--cgroup_mem_max", fmt.Sprintf("%d", memBytes),
+					"--cgroup_mem_memsw_max", fmt.Sprintf("%d", memBytes),
+				)
+			}
 		}
 		// Virtual memory cap via RLIMIT_AS catches programs that mmap excessively
 		// without touching all pages (cgroup catches RSS but not VM abuse).
@@ -67,8 +69,10 @@ func buildBaseArgs(cfg *Config, scfg *sandbox.SessionConfig, limits sandbox.Reso
 		maxPids = limits.MaxChildProcesses
 	}
 	if maxPids > 0 {
-		// cgroup pids.max prevents fork bombs from filling the PID table.
-		args = append(args, "--cgroup_pids_max", fmt.Sprintf("%d", maxPids))
+		if !cfg.DisableCgroup {
+			// cgroup pids.max prevents fork bombs from filling the PID table.
+			args = append(args, "--cgroup_pids_max", fmt.Sprintf("%d", maxPids))
+		}
 		// RLIMIT_NPROC backs this up at the per-process level.
 		args = append(args, "--rlimit_nproc", fmt.Sprintf("%d", maxPids))
 	}
@@ -89,7 +93,9 @@ func buildBaseArgs(cfg *Config, scfg *sandbox.SessionConfig, limits sandbox.Reso
 	// --cgroup_* option fails unless --use_cgroupv2 is passed. The *_parent flags
 	// are a v1-only concept; under v2 nsjail manages NSJAIL.<pid> sub-cgroups
 	// directly beneath the cgroupv2 mount.
-	if cfg.CgroupV2 {
+	if cfg.DisableCgroup {
+		// no cgroup flags at all — rlimits above are the only resource caps
+	} else if cfg.CgroupV2 {
 		args = append(args, "--use_cgroupv2")
 	} else if cfg.CgroupParent != "" {
 		args = append(args, "--cgroup_mem_parent", cfg.CgroupParent)

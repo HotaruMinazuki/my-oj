@@ -52,6 +52,12 @@ type Config struct {
 	// unified hierarchy.  cgroup v1 is still supported via the legacy flags.
 	CgroupV2 bool
 
+	// DisableCgroup omits every --cgroup_* flag (and --use_cgroupv2).
+	// Set when the judger cannot write to the cgroup hierarchy — limits then
+	// degrade to rlimits only (rlimit_as for memory, rlimit_nproc for pids),
+	// which keeps judging functional instead of failing every execution.
+	DisableCgroup bool
+
 	// InteractorNoSandbox runs the interactor binary directly (exec.Command) instead
 	// of wrapping it in nsjail.  Useful when the interactor needs capabilities that
 	// would be blocked by the sandbox.  The interactor must be a trusted binary.
@@ -61,11 +67,14 @@ type Config struct {
 // defaultReadOnlyMounts is the minimal set of host paths bind-mounted read-only
 // into every sandbox.  Language-specific entries (e.g. /usr/lib/jvm) can be added
 // via SessionConfig.ExtraBindMounts.
+// Every path here MUST exist in the judger image: nsjail treats a failed
+// bind mount as fatal and aborts before exec'ing anything. ubuntu:24.04
+// ships /lib and /lib64 as symlinks into /usr but has NO /lib32 — listing
+// a nonexistent source kills every single execution instantly.
 var defaultReadOnlyMounts = []string{
 	"/usr",
 	"/lib",
 	"/lib64",
-	"/lib32",
 	"/bin",
 	"/sbin",
 	// ld.so configuration so dynamic linking works inside the sandbox.

@@ -109,12 +109,30 @@ func main() {
 	}
 	log.Info("cgroup mode resolved", zap.Bool("v2", cgroupV2))
 
+	// Probe whether nsjail will actually be able to create per-task cgroups.
+	// nsjail treats cgroup setup failure as fatal for the execution, so an
+	// unwritable hierarchy (e.g., container without sufficient privileges)
+	// would otherwise fail EVERY submission. Degrade to rlimit-only enforcement
+	// instead, loudly.
+	disableCgroup := false
+	if cgroupV2 {
+		probeDir := "/sys/fs/cgroup/oj-judge-probe"
+		if err := os.Mkdir(probeDir, 0o755); err != nil && !os.IsExist(err) {
+			disableCgroup = true
+			log.Warn("cgroup v2 hierarchy not writable; disabling cgroup limits "+
+				"(memory/pids fall back to rlimits)", zap.Error(err))
+		} else {
+			_ = os.Remove(probeDir)
+		}
+	}
+
 	// ── Build nsjail sandbox ──────────────────────────────────────────────────
 	sb, err := nsjailsandbox.New(nsjailsandbox.Config{
 		BinaryPath:        *nsjailBin,
 		SeccompPolicyPath: *seccompPolicy,
 		CgroupParent:      "oj-judge",
 		CgroupV2:          cgroupV2,
+		DisableCgroup:     disableCgroup,
 	}, log)
 	if err != nil {
 		log.Fatal("nsjail init", zap.Error(err))

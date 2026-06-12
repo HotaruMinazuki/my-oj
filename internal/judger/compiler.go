@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/your-org/my-oj/internal/judger/sandbox"
@@ -130,6 +131,13 @@ func (c *Compiler) Compile(
 
 	if result.ExitCode != 0 || result.Status != sandbox.ExecOK {
 		// Non-zero exit = genuine compile error (CE).
+		// An empty log means the compiler never actually ran (sandbox died
+		// first) — surface the sandbox status instead of a blank panel.
+		if strings.TrimSpace(log) == "" {
+			log = fmt.Sprintf(
+				"(compiler produced no output — sandbox status %s, exit code %d: %s)",
+				result.Status, result.ExitCode, result.Message)
+		}
 		return &CompileResult{Success: false, Log: log}, nil
 	}
 

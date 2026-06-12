@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/your-org/my-oj/internal/judger/sandbox"
 )
 
@@ -69,7 +71,27 @@ func (s *Session) Execute(ctx context.Context, req *sandbox.ExecRequest) (*sandb
 	wallTime := time.Since(start)
 	<-logDone // guarantee log is fully read before we parse it
 
-	return parseResult(cmd.ProcessState, waitErr, wallTime, logBuf.String()), nil
+	res := parseResult(cmd.ProcessState, waitErr, wallTime, logBuf.String())
+	if res.Status != sandbox.ExecOK {
+		// Surface nsjail's own log: when nsjail itself dies (bad mount, cgroup
+		// setup, seccomp policy parse, exec failure) the reason exists ONLY
+		// here — the sandboxed program never ran and produced no output.
+		s.log.Warn("nsjail execution not OK",
+			zap.String("status", string(res.Status)),
+			zap.Int("exit_code", res.ExitCode),
+			zap.String("executable", req.Executable),
+			zap.String("nsjail_log", truncateLog(logBuf.String(), 2000)),
+		)
+	}
+	return res, nil
+}
+
+// truncateLog caps a log string for structured logging.
+func truncateLog(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
 }
 
 // ─── Result Parsing ───────────────────────────────────────────────────────────
