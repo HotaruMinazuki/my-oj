@@ -90,7 +90,7 @@ func NewServer(
 
 	// ── Handlers ───────────────────────────────────────────────────────────────
 	rankingH    := handler.NewRankingHandler(hub, rdb, log)
-	submissionH := handler.NewSubmissionHandler(submissions, problems, publisher, store, log)
+	submissionH := handler.NewSubmissionHandler(submissions, problems, contests, publisher, store, log)
 	adminH      := handler.NewAdminHandler(rankingService, store, testcases, log)
 	authH       := handler.NewAuthHandler(users, cfg.JWTSigningKey, log)
 	problemH    := handler.NewProblemHandler(problemList, log)

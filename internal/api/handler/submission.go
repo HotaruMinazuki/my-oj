@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/your-org/my-oj/internal/api/middleware"
 	"github.com/your-org/my-oj/internal/models"
 	"github.com/your-org/my-oj/internal/mq"
 	"github.com/your-org/my-oj/internal/storage"
@@ -33,12 +34,19 @@ type ProblemRepo interface {
 	GetTestCases(ctx context.Context, problemID models.ID) ([]models.JudgeTestCase, error)
 }
 
+// SubmissionContestRepo resolves the contest a submission belongs to, so the
+// handler can apply format-specific visibility rules (ICPC hides testcases).
+type SubmissionContestRepo interface {
+	GetByID(ctx context.Context, id models.ID) (*models.Contest, error)
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 // SubmissionHandler handles code submission and result retrieval.
 type SubmissionHandler struct {
 	submissions SubmissionRepo
 	problems    ProblemRepo
+	contests    SubmissionContestRepo
 	publisher   mq.Publisher
 	store       storage.ObjectStore
 	log         *zap.Logger
@@ -47,6 +55,7 @@ type SubmissionHandler struct {
 func NewSubmissionHandler(
 	submissions SubmissionRepo,
 	problems ProblemRepo,
+	contests SubmissionContestRepo,
 	publisher mq.Publisher,
 	store storage.ObjectStore,
 	log *zap.Logger,
@@ -54,6 +63,7 @@ func NewSubmissionHandler(
 	return &SubmissionHandler{
 		submissions: submissions,
 		problems:    problems,
+		contests:    contests,
 		publisher:   publisher,
 		store:       store,
 		log:         log,
@@ -170,6 +180,9 @@ func (h *SubmissionHandler) SubmitPractice(c *gin.Context) {
 // GetSubmission is public: 用户所有记录公开。The Submission model never
 // serialises the source code path (json:"-"), so no code leaks — only the
 // verdict, score, resource usage, and per-testcase results.
+//
+// ICPC 赛制例外: per-testcase results are hidden — contestants see only the
+// overall verdict (AC/WA/TLE/MLE/RE/CE), as is standard for the format.
 func (h *SubmissionHandler) GetSubmission(c *gin.Context) {
 	id64, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id64 <= 0 {
@@ -182,7 +195,38 @@ func (h *SubmissionHandler) GetSubmission(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "submission not found"})
 		return
 	}
+
+	h.applyContestVisibility(c, sub)
 	c.JSON(http.StatusOK, sub)
+}
+
+// applyContestVisibility strips per-testcase information from submissions in
+// ICPC-format contests for non-admin viewers. Both the testcase breakdown and
+// the judge message (which carries checker expected/got output) count as
+// testcase information; the compile log stays — it is standard ICPC feedback
+// for the contestant's own CE.
+func (h *SubmissionHandler) applyContestVisibility(c *gin.Context, sub *models.Submission) {
+	if sub.ContestID == nil {
+		return // practice submission — full details
+	}
+	roleVal, _ := c.Get(string(middleware.ContextKeyUserRole))
+	if role, _ := roleVal.(models.UserRole); role == models.RoleAdmin {
+		return // admins always see everything
+	}
+
+	contest, err := h.contests.GetByID(c.Request.Context(), *sub.ContestID)
+	if err != nil || contest == nil {
+		// Cannot determine the format — fail closed and hide details.
+		h.log.Warn("resolve contest for submission visibility",
+			zap.Int64("submission_id", sub.ID), zap.Error(err))
+		sub.TestCaseResults = nil
+		sub.JudgeMessage = ""
+		return
+	}
+	if contest.ContestType == models.ContestICPC {
+		sub.TestCaseResults = nil
+		sub.JudgeMessage = ""
+	}
 }
 
 // ─── shared helpers ───────────────────────────────────────────────────────────
