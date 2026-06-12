@@ -12,6 +12,12 @@
         <el-menu-item index="/admin/contests">
           <el-icon><Trophy /></el-icon><span>比赛管理</span>
         </el-menu-item>
+        <el-menu-item index="/admin/users">
+          <el-icon><User /></el-icon><span>用户管理</span>
+        </el-menu-item>
+        <el-menu-item index="/admin/submissions">
+          <el-icon><List /></el-icon><span>提交记录</span>
+        </el-menu-item>
         <el-menu-item index="/">
           <el-icon><House /></el-icon><span>回到主站</span>
         </el-menu-item>

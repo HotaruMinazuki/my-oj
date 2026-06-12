@@ -48,6 +48,44 @@ FROM users WHERE username = $1`
 	return &u, nil
 }
 
+// Search lists users whose username / email / organization contains q
+// (case-insensitive), newest first; empty q lists everyone. Returns the total
+// matching count for pagination. Used by the admin user-management page.
+func (r *UserRepo) Search(ctx context.Context, q string, limit, offset int) ([]models.User, int, error) {
+	pattern := "%" + q + "%"
+	const countQ = `
+SELECT COUNT(*) FROM users
+WHERE username ILIKE $1 OR email ILIKE $1 OR organization ILIKE $1`
+	var total int
+	if err := r.db.QueryRowContext(ctx, countQ, pattern).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count users: %w", err)
+	}
+
+	const listQ = `
+SELECT id, username, email, role, organization, created_at, updated_at
+FROM users
+WHERE username ILIKE $1 OR email ILIKE $1 OR organization ILIKE $1
+ORDER BY id DESC
+LIMIT $2 OFFSET $3`
+	rows, err := r.db.QueryContext(ctx, listQ, pattern, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search users: %w", err)
+	}
+	defer rows.Close()
+
+	var out []models.User
+	for rows.Next() {
+		var u models.User
+		if err := rows.Scan(
+			&u.ID, &u.Username, &u.Email, &u.Role, &u.Organization, &u.CreatedAt, &u.UpdatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan user row: %w", err)
+		}
+		out = append(out, u)
+	}
+	return out, total, rows.Err()
+}
+
 func (r *UserRepo) GetByID(ctx context.Context, id models.ID) (*models.User, error) {
 	const q = `
 SELECT id, username, email, password_hash, role, organization, created_at, updated_at

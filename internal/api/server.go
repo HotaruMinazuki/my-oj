@@ -49,6 +49,9 @@ func NewServer(
 	testcases handler.TestcaseAdminRepo,
 	users handler.AuthUserRepo,
 	contests handler.ContestCRUDRepo,
+	userDirectory handler.UserDirectoryRepo,
+	submissionHistory handler.SubmissionHistoryRepo,
+	contestHistory handler.ContestHistoryRepo,
 	log *zap.Logger,
 ) *Server {
 	if cfg.ReadTimeout == 0 {
@@ -92,6 +95,7 @@ func NewServer(
 	authH       := handler.NewAuthHandler(users, cfg.JWTSigningKey, log)
 	problemH    := handler.NewProblemHandler(problemList, log)
 	contestH    := handler.NewContestHandler(contests, log)
+	userH       := handler.NewUserHandler(userDirectory, submissionHistory, contestHistory, log)
 
 	auth      := middleware.Auth(cfg.JWTSigningKey)
 	adminOnly := middleware.RequireRole(models.RoleAdmin)
@@ -121,6 +125,14 @@ func NewServer(
 		// Ranking snapshot — read-only, no auth required for public contests.
 		v1.GET("/contests/:contest_id/ranking", rankingH.GetSnapshot)
 
+		// User profiles — 所有记录公开: anyone can view any user's history.
+		v1.GET("/users/:id", optAuth, userH.GetProfile)
+		v1.GET("/users/:id/submissions", optAuth, userH.ListSubmissions)
+		v1.GET("/users/:id/contests", optAuth, userH.ListContests)
+
+		// Submission detail — public for the same reason (no source code inside).
+		v1.GET("/submissions/:id", optAuth, submissionH.GetSubmission)
+
 		// Authenticated routes
 		authed := v1.Group("/", auth)
 		{
@@ -132,7 +144,6 @@ func NewServer(
 
 			// Practice (out-of-contest) submissions
 			authed.POST("/submissions", submissionH.SubmitPractice)
-			authed.GET("/submissions/:id", submissionH.GetSubmission)
 		}
 
 		// Admin routes — require auth + admin role
@@ -151,6 +162,10 @@ func NewServer(
 			// Contest ↔ problem linking
 			admin.POST("/contests/:contest_id/problems", contestH.AddProblem)
 			admin.DELETE("/contests/:contest_id/problems/:problem_id", contestH.RemoveProblem)
+
+			// User management & global submission history
+			admin.GET("/users", userH.AdminSearchUsers)
+			admin.GET("/submissions", userH.AdminListSubmissions)
 		}
 	}
 

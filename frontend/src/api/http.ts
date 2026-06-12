@@ -3,7 +3,8 @@ import { ElMessage } from 'element-plus'
 
 import type {
   AuthResponse, Contest, ContestProblemSummary, Paginated,
-  Problem, RankingSnapshot, Submission, User,
+  Problem, RankingSnapshot, Submission, SubmissionListItem,
+  User, UserPublic, UserSubmissionStats,
 } from '@/types'
 
 // ─── Axios instance ───────────────────────────────────────────────────────────
@@ -118,4 +119,31 @@ export const submissionApi = {
 
   get: (id: number) =>
     http.get<Submission>(`/submissions/${id}`).then(r => r.data),
+}
+
+// ─── User API (公开主页: 所有记录公开) ────────────────────────────────────────
+export const userApi = {
+  profile: (id: number) =>
+    http.get<{ user: UserPublic; stats: UserSubmissionStats }>(`/users/${id}`).then(r => r.data),
+
+  submissions: (id: number, page = 1, size = 20) =>
+    http.get<{ submissions: SubmissionListItem[]; total: number }>(
+      `/users/${id}/submissions`, { params: { page, size } }).then(r => r.data),
+
+  contests: (id: number) =>
+    http.get<{ contests: Contest[] }>(`/users/${id}/contests`).then(r => r.data),
+}
+
+// ─── Admin API (用户管理 / 全部提交) ──────────────────────────────────────────
+export const adminApi = {
+  searchUsers: (q = '', page = 1, size = 20) =>
+    http.get<{ users: User[]; total: number }>(
+      '/admin/users', { params: { q, page, size } }).then(r => r.data),
+
+  listSubmissions: (params: {
+    page?: number; size?: number
+    user_id?: number; problem_id?: number; contest_id?: number; status?: string
+  } = {}) =>
+    http.get<{ submissions: SubmissionListItem[]; total: number }>(
+      '/admin/submissions', { params }).then(r => r.data),
 }

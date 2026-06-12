@@ -108,6 +108,40 @@ export interface Submission {
   updated_at: string
 }
 
+// ─── User profile (公开主页) ──────────────────────────────────────────────────
+
+// UserPublic is the public view of a user — no email, no sensitive fields.
+export interface UserPublic {
+  id: ID
+  username: string
+  role: UserRole
+  organization?: string
+  created_at: string
+}
+
+export interface UserSubmissionStats {
+  total: number
+  accepted: number
+  solved: number
+}
+
+// SubmissionListItem is the lightweight row used by history listings
+// (per-user history and the admin global list). No compile log / testcase data.
+export interface SubmissionListItem {
+  id: ID
+  user_id: ID
+  username: string
+  problem_id: ID
+  problem_title: string
+  contest_id?: ID | null
+  language: Language
+  status: SubmissionStatus
+  score: number
+  time_used_ms: number
+  mem_used_kb: number
+  created_at: string
+}
+
 // ─── Ranking (WebSocket payloads) ────────────────────────────────────────────
 export interface RankingProblemCell {
   solved: boolean

@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/your-org/my-oj/internal/api/middleware"
 	"github.com/your-org/my-oj/internal/models"
 	"github.com/your-org/my-oj/internal/mq"
 	"github.com/your-org/my-oj/internal/storage"
@@ -168,6 +167,9 @@ func (h *SubmissionHandler) SubmitPractice(c *gin.Context) {
 
 // ─── GET /api/v1/submissions/:id ─────────────────────────────────────────────
 
+// GetSubmission is public: 用户所有记录公开。The Submission model never
+// serialises the source code path (json:"-"), so no code leaks — only the
+// verdict, score, resource usage, and per-testcase results.
 func (h *SubmissionHandler) GetSubmission(c *gin.Context) {
 	id64, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id64 <= 0 {
@@ -175,30 +177,11 @@ func (h *SubmissionHandler) GetSubmission(c *gin.Context) {
 		return
 	}
 
-	// Resolve identity first; defence in depth even though `auth` middleware
-	// is already required by the router. If somehow the middleware is removed
-	// or bypassed, we still fail closed rather than 403-by-accident leaking
-	// "this submission exists" information to anonymous callers.
-	userID, ok := middleware.UserIDFromCtx(c)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
-		return
-	}
-	roleVal, _ := c.Get(string(middleware.ContextKeyUserRole))
-	role, _ := roleVal.(models.UserRole)
-
-	ctx := c.Request.Context()
-	sub, err := h.submissions.GetByID(ctx, models.ID(id64))
+	sub, err := h.submissions.GetByID(c.Request.Context(), models.ID(id64))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "submission not found"})
 		return
 	}
-
-	if role != models.RoleAdmin && sub.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-		return
-	}
-
 	c.JSON(http.StatusOK, sub)
 }
 

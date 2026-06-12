@@ -67,6 +67,35 @@ ORDER BY start_time DESC LIMIT $1 OFFSET $2`
 	return contests, total, rows.Err()
 }
 
+// ListByParticipant returns every contest the user has registered for,
+// newest start time first. Contest counts per user are small, so no pagination.
+func (r *ContestRepo) ListByParticipant(ctx context.Context, userID models.ID) ([]models.Contest, error) {
+	const q = `
+SELECT c.id, c.title, c.description, c.contest_type, c.status,
+       c.start_time, c.end_time, c.freeze_time, c.is_public, c.allow_late_register, c.organizer_id,
+       c.created_at, c.updated_at
+FROM   contest_participants cp
+JOIN   contests c ON c.id = cp.contest_id
+WHERE  cp.user_id = $1
+ORDER  BY c.start_time DESC`
+
+	rows, err := r.db.QueryContext(ctx, q, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list contests for user %d: %w", userID, err)
+	}
+	defer rows.Close()
+
+	var out []models.Contest
+	for rows.Next() {
+		c, err := scanContest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *c)
+	}
+	return out, rows.Err()
+}
+
 // ─── GetByID ──────────────────────────────────────────────────────────────────
 
 func (r *ContestRepo) GetByID(ctx context.Context, id models.ID) (*models.Contest, error) {

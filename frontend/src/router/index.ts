@@ -14,7 +14,9 @@ const router = createRouter({
         { path: 'contests',    name: 'contests',    component: () => import('@/views/ContestsView.vue') },
         { path: 'contests/:id', name: 'contest',   component: () => import('@/views/ContestDetailView.vue') },
         { path: 'contests/:id/ranking', name: 'ranking', component: () => import('@/views/ContestRankingView.vue') },
-        { path: 'submissions/:id', name: 'submission', component: () => import('@/views/SubmissionDetailView.vue'), meta: { requiresAuth: true } },
+        // 所有记录公开: 提交详情、用户主页均无需登录
+        { path: 'submissions/:id', name: 'submission', component: () => import('@/views/SubmissionDetailView.vue') },
+        { path: 'users/:id', name: 'user-profile', component: () => import('@/views/UserProfileView.vue') },
         {
           path: 'admin',
           component: () => import('@/views/admin/AdminLayout.vue'),
@@ -23,6 +25,8 @@ const router = createRouter({
             { path: '', name: 'admin',                   component: () => import('@/views/admin/AdminDashboard.vue') },
             { path: 'problems',  name: 'admin-problems', component: () => import('@/views/admin/AdminProblems.vue') },
             { path: 'contests',  name: 'admin-contests', component: () => import('@/views/admin/AdminContests.vue') },
+            { path: 'users',       name: 'admin-users',       component: () => import('@/views/admin/AdminUsers.vue') },
+            { path: 'submissions', name: 'admin-submissions', component: () => import('@/views/admin/AdminSubmissions.vue') },
             { path: 'contests/:id/unfreeze', name: 'admin-unfreeze', component: () => import('@/views/admin/AdminUnfreeze.vue') },
           ]
         }

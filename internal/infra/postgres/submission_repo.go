@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -108,6 +109,124 @@ func (r *SubmissionRepo) GetByID(ctx context.Context, id models.ID) (*models.Sub
 		}
 	}
 
+	return &s, nil
+}
+
+// ─── List (history pages) ─────────────────────────────────────────────────────
+
+// SubmissionFilter narrows ListAll. Nil/zero fields are ignored.
+type SubmissionFilter struct {
+	UserID    *models.ID
+	ProblemID *models.ID
+	ContestID *models.ID
+	Status    string
+}
+
+// SubmissionListItem is the lightweight row for history listings.
+// Heavy columns (compile_log, test_case_results) are intentionally excluded —
+// the detail endpoint serves those.
+type SubmissionListItem struct {
+	ID           models.ID               `json:"id"`
+	UserID       models.ID               `json:"user_id"`
+	Username     string                  `json:"username"`
+	ProblemID    models.ID               `json:"problem_id"`
+	ProblemTitle string                  `json:"problem_title"`
+	ContestID    *models.ID              `json:"contest_id,omitempty"`
+	Language     models.Language         `json:"language"`
+	Status       models.SubmissionStatus `json:"status"`
+	Score        int                     `json:"score"`
+	TimeUsedMs   int64                   `json:"time_used_ms"`
+	MemUsedKB    int64                   `json:"mem_used_kb"`
+	CreatedAt    time.Time               `json:"created_at"`
+}
+
+// ListAll returns submissions newest-first with optional filters, plus the
+// total row count for pagination. Serves both the public per-user history
+// (filter.UserID set) and the admin global listing (no filter).
+func (r *SubmissionRepo) ListAll(ctx context.Context, f SubmissionFilter, limit, offset int) ([]SubmissionListItem, int, error) {
+	where := ""
+	args := []interface{}{}
+	add := func(cond string, v interface{}) {
+		args = append(args, v)
+		if where == "" {
+			where = "WHERE "
+		} else {
+			where += " AND "
+		}
+		where += fmt.Sprintf(cond, len(args))
+	}
+	if f.UserID != nil {
+		add("s.user_id = $%d", *f.UserID)
+	}
+	if f.ProblemID != nil {
+		add("s.problem_id = $%d", *f.ProblemID)
+	}
+	if f.ContestID != nil {
+		add("s.contest_id = $%d", *f.ContestID)
+	}
+	if f.Status != "" {
+		add("s.status = $%d", f.Status)
+	}
+
+	countQ := `SELECT COUNT(*) FROM submissions s ` + where
+	var total int
+	if err := r.db.QueryRowContext(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count submissions: %w", err)
+	}
+
+	listQ := `
+SELECT s.id, s.user_id, u.username, s.problem_id, p.title, s.contest_id,
+       s.language, s.status, s.score, s.time_used_ms, s.mem_used_kb, s.created_at
+FROM   submissions s
+JOIN   users u    ON u.id = s.user_id
+JOIN   problems p ON p.id = s.problem_id
+` + where + fmt.Sprintf(`
+ORDER BY s.id DESC
+LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.QueryContext(ctx, listQ, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list submissions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SubmissionListItem
+	for rows.Next() {
+		var it SubmissionListItem
+		var contestID sql.NullInt64
+		if err := rows.Scan(
+			&it.ID, &it.UserID, &it.Username, &it.ProblemID, &it.ProblemTitle, &contestID,
+			&it.Language, &it.Status, &it.Score, &it.TimeUsedMs, &it.MemUsedKB, &it.CreatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan submission list item: %w", err)
+		}
+		if contestID.Valid {
+			cid := models.ID(contestID.Int64)
+			it.ContestID = &cid
+		}
+		out = append(out, it)
+	}
+	return out, total, rows.Err()
+}
+
+// UserSubmissionStats summarises one user's judging history for profile pages.
+type UserSubmissionStats struct {
+	Total    int `json:"total"`
+	Accepted int `json:"accepted"`
+	Solved   int `json:"solved"` // distinct problems with at least one AC
+}
+
+func (r *SubmissionRepo) UserStats(ctx context.Context, userID models.ID) (*UserSubmissionStats, error) {
+	const q = `
+SELECT COUNT(*),
+       COUNT(*)                    FILTER (WHERE status = 'Accepted'),
+       COUNT(DISTINCT problem_id)  FILTER (WHERE status = 'Accepted')
+FROM submissions WHERE user_id = $1`
+	var s UserSubmissionStats
+	if err := r.db.QueryRowContext(ctx, q, userID).Scan(&s.Total, &s.Accepted, &s.Solved); err != nil {
+		return nil, fmt.Errorf("user submission stats for %d: %w", userID, err)
+	}
 	return &s, nil
 }
 

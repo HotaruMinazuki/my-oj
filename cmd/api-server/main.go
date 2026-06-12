@@ -168,6 +168,9 @@ func main() {
 		problemRepo,   // ... and TestcaseAdminRepo
 		userRepo,
 		contestRepo,
+		userRepo,       // UserDirectoryRepo: profiles + admin search
+		submissionRepo, // SubmissionHistoryRepo: history listings + stats
+		contestRepo,    // ContestHistoryRepo: per-user contest records
 		log,
 	)
 

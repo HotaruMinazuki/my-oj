@@ -31,7 +31,10 @@
               </span>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="logout" :icon="SwitchButton">
+                  <el-dropdown-item command="profile" :icon="UserIcon">
+                    个人主页
+                  </el-dropdown-item>
+                  <el-dropdown-item command="logout" :icon="SwitchButton" divided>
                     退出登录
                   </el-dropdown-item>
                 </el-dropdown-menu>
@@ -78,12 +81,12 @@
         </div>
         <el-divider />
         <template v-if="auth.isLoggedIn">
-          <div class="drawer-user">
+          <router-link :to="`/users/${auth.user?.id}`" class="drawer-user" @click="menuOpen = false">
             <el-avatar :size="36" class="user-avatar">
               {{ auth.user?.username?.[0]?.toUpperCase() }}
             </el-avatar>
             <span>{{ auth.user?.username }}</span>
-          </div>
+          </router-link>
           <el-button type="danger" plain size="small" style="width:100%;margin-top:12px" @click="handleLogout">
             退出登录
           </el-button>
@@ -121,7 +124,7 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
-import { ArrowDown, Menu, Close, SwitchButton } from '@element-plus/icons-vue'
+import { ArrowDown, Menu, Close, SwitchButton, User as UserIcon } from '@element-plus/icons-vue'
 
 const auth    = useAuthStore()
 const router  = useRouter()
@@ -129,6 +132,7 @@ const menuOpen = ref(false)
 
 function handleCommand(cmd: string) {
   if (cmd === 'logout') handleLogout()
+  if (cmd === 'profile' && auth.user) router.push(`/users/${auth.user.id}`)
 }
 function handleLogout() {
   auth.logout()
@@ -229,7 +233,14 @@ function handleLogout() {
 }
 .drawer-link:hover { background: var(--oj-bg); }
 .drawer-link.router-link-active { background: #ecf5ff; color: var(--oj-primary); }
-.drawer-user { display: flex; align-items: center; gap: 10px; font-weight: 500; }
+.drawer-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  color: var(--oj-text);
+  text-decoration: none;
+}
 
 /* ── Main ── */
 .main-content { flex: 1; padding: 24px 20px; }
