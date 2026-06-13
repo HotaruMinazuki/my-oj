@@ -41,6 +41,7 @@ func NewServer(
 	rdb *redis.Client,
 	publisher mq.Publisher,
 	store storage.ObjectStore,
+	rankingService *ranking.RankingService,
 	hub *ranking.Hub,
 	submissions handler.SubmissionRepo,
 	problems handler.ProblemRepo,
@@ -92,7 +93,7 @@ func NewServer(
 	// ── Handlers ───────────────────────────────────────────────────────────────
 	rankingH    := handler.NewRankingHandler(hub, rdb, log)
 	submissionH := handler.NewSubmissionHandler(submissions, problems, contests, publisher, store, log)
-	adminH      := handler.NewAdminHandler(store, testcases, log)
+	adminH      := handler.NewAdminHandler(rankingService, store, testcases, log)
 	authH       := handler.NewAuthHandler(users, cfg.JWTSigningKey, log)
 	problemH    := handler.NewProblemHandler(problemList, log)
 	contestH    := handler.NewContestHandler(contests, log)
@@ -170,6 +171,9 @@ func NewServer(
 
 			// Resolver (滚榜) event-feed XML export
 			admin.GET("/contests/:contest_id/resolver.xml", resolverH.ExportEventFeed)
+
+			// 解榜: reveal frozen scoreboard after the contest ends
+			admin.POST("/contests/:contest_id/reveal", adminH.RevealContest)
 		}
 	}
 

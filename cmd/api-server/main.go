@@ -162,6 +162,7 @@ func main() {
 		rdb,
 		publisher,
 		store,
+		rankingService,
 		hub,
 		submissionRepo,
 		problemRepo,

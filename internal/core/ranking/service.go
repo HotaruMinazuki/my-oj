@@ -189,9 +189,31 @@ func (rs *RankingService) processContestResult(ctx context.Context, result *mq.R
 	return nil
 }
 
+// RevealContest is the admin-triggered 解榜 action: it marks the contest as
+// revealed, then recomputes and broadcasts the board so the (previously frozen)
+// final results become visible to everyone. Idempotent — safe to call twice.
+func (rs *RankingService) RevealContest(ctx context.Context, contestID models.ID) error {
+	if err := rs.rdb.Set(ctx, redisKey(contestID, keyRevealed), "1", 0).Err(); err != nil {
+		return fmt.Errorf("ranking: set revealed flag: %w", err)
+	}
+	meta, err := rs.contestCache.get(ctx, contestID)
+	if err != nil {
+		return fmt.Errorf("ranking: load contest %d: %w", contestID, err)
+	}
+	strategy, err := rs.registry.Get(meta.ContestType)
+	if err != nil {
+		return fmt.Errorf("ranking: strategy for contest %d: %w", contestID, err)
+	}
+	snapshot, err := rs.rebuildSnapshot(ctx, contestID, meta, strategy)
+	if err != nil {
+		return fmt.Errorf("ranking: rebuild on reveal: %w", err)
+	}
+	return rs.publishSnapshot(ctx, contestID, snapshot)
+}
+
 // rebuildSnapshot recomputes the full board from the entry hash, stores it at
-// keySnapshot, and returns it. Frozen ICPC results are auto-revealed once the
-// contest has ended (no manual 滚榜 ceremony).
+// keySnapshot, and returns it. Frozen ICPC results stay hidden until an admin
+// reveals the contest (解榜).
 func (rs *RankingService) rebuildSnapshot(
 	ctx context.Context,
 	contestID models.ID,
@@ -204,8 +226,12 @@ func (rs *RankingService) rebuildSnapshot(
 	}
 
 	now := time.Now().UTC()
-	ended := !meta.EndTime.IsZero() && !now.Before(meta.EndTime)
-	frozen := meta.FreezeTime != nil && !now.Before(*meta.FreezeTime) && !ended
+	// The board freezes at FreezeTime and STAYS frozen — through the end of the
+	// contest — until an admin explicitly reveals (解榜). The reveal flag both
+	// un-freezes the display and unlocks the hidden results below.
+	revealed := rs.rdb.Exists(ctx, redisKey(contestID, keyRevealed)).Val() == 1
+	inFreeze := meta.FreezeTime != nil && !now.Before(*meta.FreezeTime)
+	frozen := inFreeze && !revealed
 
 	var entries []*contest.ScoreEntry
 	for _, raw := range rawEntries {
@@ -213,12 +239,12 @@ func (rs *RankingService) rebuildSnapshot(
 		if json.Unmarshal([]byte(raw), &e) != nil {
 			continue
 		}
-		// Auto-reveal frozen ICPC submissions once the contest is over.
-		if ended {
+		// Reveal frozen ICPC submissions only after the admin triggers 解榜.
+		if revealed {
 			if icpc, ok := strategy.(*contest.ICPCStrategy); ok {
 				for len(e.FrozenResults) > 0 {
-					revealed, _ := icpc.RevealNext(&e, meta.StartTime, meta.EndTime, meta.Settings)
-					e = *revealed
+					rev, _ := icpc.RevealNext(&e, meta.StartTime, meta.EndTime, meta.Settings)
+					e = *rev
 				}
 			}
 		}

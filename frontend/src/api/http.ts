@@ -148,6 +148,10 @@ export const adminApi = {
     http.get<{ submissions: SubmissionListItem[]; total: number }>(
       '/admin/submissions', { params }).then(r => r.data),
 
+  // 解榜: reveal a contest's frozen scoreboard after it ends.
+  revealContest: (contestId: number) =>
+    http.post(`/admin/contests/${contestId}/reveal`).then(r => r.data),
+
   // Download the resolver (滚榜) event-feed XML for a contest. Uses the axios
   // instance so the admin JWT is attached, then triggers a browser download.
   exportResolverXml: async (contestId: number) => {

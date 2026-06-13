@@ -34,19 +34,43 @@ type TestcaseAdminRepo interface {
 	ReplaceTestCases(ctx context.Context, problemID models.ID, cases []models.JudgeTestCase) error
 }
 
+// ContestRevealer triggers the post-contest 解榜 (reveal of frozen results).
+type ContestRevealer interface {
+	RevealContest(ctx context.Context, contestID models.ID) error
+}
+
 // AdminHandler exposes privileged contest- and problem-management endpoints.
 type AdminHandler struct {
+	revealer  ContestRevealer
 	store     storage.ObjectStore
 	testcases TestcaseAdminRepo
 	log       *zap.Logger
 }
 
 func NewAdminHandler(
+	revealer ContestRevealer,
 	store storage.ObjectStore,
 	testcases TestcaseAdminRepo,
 	log *zap.Logger,
 ) *AdminHandler {
-	return &AdminHandler{store: store, testcases: testcases, log: log}
+	return &AdminHandler{revealer: revealer, store: store, testcases: testcases, log: log}
+}
+
+// ─── POST /api/v1/admin/contests/:contest_id/reveal ──────────────────────────
+
+// RevealContest unfreezes a contest's scoreboard after it ends (解榜), making
+// the previously hidden results visible to all viewers.
+func (h *AdminHandler) RevealContest(c *gin.Context) {
+	contestID, ok := parseContestID(c)
+	if !ok {
+		return
+	}
+	if err := h.revealer.RevealContest(c.Request.Context(), contestID); err != nil {
+		h.log.Error("reveal contest", zap.Error(err), zap.Int64("contest_id", contestID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "scoreboard revealed", "contest_id": contestID})
 }
 
 // ─── POST /api/v1/admin/problems/:id/testcases ───────────────────────────────

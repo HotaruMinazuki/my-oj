@@ -31,6 +31,15 @@
             <el-button size="small" plain :loading="exportingId === row.id" @click="exportXml(row)">
               滚榜XML
             </el-button>
+            <el-button
+              v-if="row.status === 'ended'"
+              size="small"
+              type="warning"
+              :loading="revealingId === row.id"
+              @click="reveal(row)"
+            >
+              解榜
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -212,6 +221,28 @@ async function exportXml(row: Contest) {
     ElMessage.error('导出失败')
   } finally {
     exportingId.value = null
+  }
+}
+
+// ─── 解榜 (reveal frozen scoreboard) ───────────────────────────────────────
+const revealingId = ref<number | null>(null)
+async function reveal(row: Contest) {
+  try {
+    await ElMessageBox.confirm(
+      `确认对「${row.title}」解榜？解榜后所有人都能看到封榜期间的最终结果，此操作不可撤销。`,
+      '确认解榜',
+      { type: 'warning', confirmButtonText: '解榜', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  revealingId.value = row.id
+  try {
+    await adminApi.revealContest(row.id)
+    ElMessage.success('已解榜，排行榜已对所有人公开最终结果')
+  } catch {
+    ElMessage.error('解榜失败')
+  } finally {
+    revealingId.value = null
   }
 }
 

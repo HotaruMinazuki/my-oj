@@ -23,6 +23,10 @@ const (
 	// keySnapshot is a Redis String holding the latest BoardSnapshot JSON.
 	// Read by the REST endpoint and on WebSocket connect.
 	keySnapshot = "snapshot"
+	// keyRevealed is a Redis String flag ("1") set when an admin reveals the
+	// frozen results after a contest ends (解榜). Until set, frozen results stay
+	// hidden even after the contest is over.
+	keyRevealed = "revealed"
 	// keyEvents is the Redis Pub/Sub channel for this contest's board updates.
 	// Payloads are full pre-serialised WS frames: {"type":"snapshot","data":{…}}.
 	keyEvents = "events"
