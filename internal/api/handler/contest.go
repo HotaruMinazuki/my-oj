@@ -25,6 +25,9 @@ type ContestCRUDRepo interface {
 	IsRegistered(ctx context.Context, contestID, userID models.ID) (bool, error)
 	Create(ctx context.Context, c *models.Contest) error
 	AddProblem(ctx context.Context, contestID, problemID models.ID, label string, maxScore, ordinal int) error
+	// CreateContestProblem creates a brand-new problem (is_public=false) and links
+	// it to the contest in one transaction. p.ID is back-filled on success.
+	CreateContestProblem(ctx context.Context, contestID models.ID, p *models.Problem, label string, maxScore, ordinal int) error
 	RemoveProblem(ctx context.Context, contestID, problemID models.ID) error
 }
 
@@ -256,11 +259,24 @@ func (h *ContestHandler) Create(c *gin.Context) {
 
 // ─── AddProblem (Admin)  POST /api/v1/admin/contests/:contest_id/problems ────
 
+// addProblemReq creates a NEW problem inside the contest, or — when problem_id
+// is provided — links an existing problem. The primary flow is in-contest
+// creation: problems are authored here (not in the global bank) and become
+// public in the bank automatically once the contest ends.
 type addProblemReq struct {
-	ProblemID models.ID `json:"problem_id" binding:"required"`
-	Label     string    `json:"label"      binding:"required"`
-	MaxScore  int       `json:"max_score"`
-	Ordinal   int       `json:"ordinal"`
+	Label    string `json:"label" binding:"required"`
+	MaxScore int    `json:"max_score"`
+	Ordinal  int    `json:"ordinal"`
+
+	// Link mode: reuse an existing problem.
+	ProblemID models.ID `json:"problem_id"`
+
+	// Create mode (problem_id omitted/0): author a new problem.
+	Title       string           `json:"title"`
+	Statement   string           `json:"statement"`
+	TimeLimitMs int64            `json:"time_limit_ms"`
+	MemLimitKB  int64            `json:"mem_limit_kb"`
+	JudgeType   models.JudgeType `json:"judge_type"`
 }
 
 func (h *ContestHandler) AddProblem(c *gin.Context) {
@@ -274,25 +290,69 @@ func (h *ContestHandler) AddProblem(c *gin.Context) {
 		return
 	}
 
-	if err := h.contests.AddProblem(
-		c.Request.Context(), contestID, req.ProblemID,
-		req.Label, req.MaxScore, req.Ordinal,
+	// ── Link an existing problem ──────────────────────────────────────────────
+	if req.ProblemID > 0 {
+		if err := h.contests.AddProblem(
+			c.Request.Context(), contestID, req.ProblemID,
+			req.Label, req.MaxScore, req.Ordinal,
+		); err != nil {
+			if isUniqueViolation(err) {
+				c.JSON(http.StatusConflict, gin.H{"error": "problem already in contest"})
+				return
+			}
+			if isForeignKeyViolation(err) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "contest or problem not found"})
+				return
+			}
+			h.log.Error("add problem to contest", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{"message": "problem added"})
+		return
+	}
+
+	// ── Create a new in-contest problem (hidden until the contest ends) ───────
+	if req.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "title is required when creating a problem"})
+		return
+	}
+	authorID, _ := middleware.UserIDFromCtx(c)
+	p := &models.Problem{
+		Title:       req.Title,
+		Statement:   req.Statement,
+		TimeLimitMs: req.TimeLimitMs,
+		MemLimitKB:  req.MemLimitKB,
+		JudgeType:   req.JudgeType,
+		IsPublic:    false, // revealed to the bank automatically when the contest ends
+		AuthorID:    authorID,
+	}
+	if p.TimeLimitMs == 0 {
+		p.TimeLimitMs = 2000
+	}
+	if p.MemLimitKB == 0 {
+		p.MemLimitKB = 262144
+	}
+	if p.JudgeType == "" {
+		p.JudgeType = models.JudgeStandard
+	}
+
+	if err := h.contests.CreateContestProblem(
+		c.Request.Context(), contestID, p, req.Label, req.MaxScore, req.Ordinal,
 	); err != nil {
-		// Duplicate (same contest + problem) returns Postgres error 23505;
-		// surface as 409 for the UI to show a friendlier message.
 		if isUniqueViolation(err) {
-			c.JSON(http.StatusConflict, gin.H{"error": "problem already in contest"})
+			c.JSON(http.StatusConflict, gin.H{"error": "label already used in this contest"})
 			return
 		}
 		if isForeignKeyViolation(err) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "contest or problem not found"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "contest not found"})
 			return
 		}
-		h.log.Error("add problem to contest", zap.Error(err))
+		h.log.Error("create contest problem", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"message": "problem added"})
+	c.JSON(http.StatusCreated, gin.H{"message": "problem created", "problem_id": p.ID})
 }
 
 // ─── RemoveProblem (Admin) DELETE /api/v1/admin/contests/:contest_id/problems/:problem_id ──

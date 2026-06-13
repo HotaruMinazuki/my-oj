@@ -98,11 +98,11 @@
         :closable="false"
         show-icon
         style="margin-bottom:16px"
-        description="将题目加入比赛后，选手方可在比赛页提交。Label 一般用 A/B/C… 作为展示编号。"
+        description="题目在本场比赛中创建：比赛进行中仅参赛者可见，比赛结束后自动进入题库公开。创建后请为每题上传测试数据，否则无法评测。"
       />
 
       <!-- 已有题目 -->
-      <div class="section-sub">已关联题目（{{ linkedProblems.length }}）</div>
+      <div class="section-sub">本场题目（{{ linkedProblems.length }}）</div>
       <el-table
         :data="linkedProblems"
         v-loading="loadingLinked"
@@ -110,17 +110,17 @@
         border
         style="margin-bottom:20px"
       >
-        <el-table-column label="Label" prop="label" width="80" align="center">
+        <el-table-column label="Label" prop="label" width="70" align="center">
           <template #default="{ row }">
             <span class="label-badge">{{ row.label }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="#"      prop="problem_id" width="60" align="center" />
-        <el-table-column label="题目"   prop="title" min-width="200" />
-        <el-table-column label="分值"   prop="max_score" width="80" align="center" />
-        <el-table-column label="顺序"   prop="ordinal" width="70" align="center" />
-        <el-table-column label="操作"   width="90" align="center">
+        <el-table-column label="#"      prop="problem_id" width="56" align="center" />
+        <el-table-column label="题目"   prop="title" min-width="180" />
+        <el-table-column label="分值"   prop="max_score" width="70" align="center" />
+        <el-table-column label="操作"   width="170" align="center">
           <template #default="{ row }">
+            <el-button size="small" plain @click="openUpload(row)">上传数据</el-button>
             <el-button
               size="small"
               type="danger"
@@ -133,67 +133,94 @@
           </template>
         </el-table-column>
         <template #empty>
-          <span class="empty-hint">暂无题目，请在下方添加</span>
+          <span class="empty-hint">暂无题目，请在下方新建</span>
         </template>
       </el-table>
 
-      <!-- 添加新题目 -->
-      <div class="section-sub">添加题目</div>
-      <div class="add-row">
-        <el-select
-          v-model="addForm.problem_id"
-          filterable
-          placeholder="选择题目（支持搜索）"
-          style="flex:2"
-          :loading="loadingAllProblems"
-        >
-          <el-option
-            v-for="p in availableProblems"
-            :key="p.id"
-            :label="`#${p.id}  ${p.title}`"
-            :value="p.id"
-          />
-        </el-select>
-        <el-input
-          v-model="addForm.label"
-          placeholder="Label（如 A）"
-          style="flex:1"
-          maxlength="4"
-        />
-        <el-input-number
-          v-model="addForm.max_score"
-          :min="1"
-          :max="1000"
-          :step="10"
-          controls-position="right"
-          style="flex:1"
-        />
-        <el-button
-          type="primary"
-          :icon="Plus"
-          :loading="adding"
-          :disabled="!addForm.problem_id || !addForm.label"
-          @click="handleAddProblem"
-        >
-          添加
-        </el-button>
-      </div>
+      <!-- 新建题目 -->
+      <div class="section-sub">在本场比赛中新建题目</div>
+      <el-form :model="newProb" label-width="92px" class="newprob-form">
+        <el-form-item label="Label">
+          <el-input v-model="newProb.label" maxlength="4" style="width:120px" placeholder="如 A" />
+        </el-form-item>
+        <el-form-item label="题目名称">
+          <el-input v-model="newProb.title" placeholder="题目标题" />
+        </el-form-item>
+        <el-form-item label="题面">
+          <el-input v-model="newProb.statement" type="textarea" :rows="4" placeholder="支持 Markdown" />
+        </el-form-item>
+        <el-form-item label="评测类型">
+          <el-select v-model="newProb.judge_type" style="width:170px">
+            <el-option label="标准（diff）" value="standard" />
+            <el-option label="Special Judge" value="special" />
+            <el-option label="交互题" value="interactive" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="时限 / 内存">
+          <el-input-number v-model="newProb.time_limit_ms" :min="100" :max="30000" :step="500" />
+          <span class="unit">ms</span>
+          <el-input-number v-model="newProb.mem_limit_kb" :min="16384" :max="1048576" :step="65536" style="margin-left:14px" />
+          <span class="unit">KB</span>
+        </el-form-item>
+        <el-form-item label="分值">
+          <el-input-number v-model="newProb.max_score" :min="1" :max="1000" :step="10" />
+          <span class="unit">OI/IOI 计分用</span>
+        </el-form-item>
+        <el-form-item>
+          <el-button
+            type="primary"
+            :icon="Plus"
+            :loading="creatingProb"
+            :disabled="!newProb.title || !newProb.label"
+            @click="handleCreateProblem"
+          >
+            创建并加入比赛
+          </el-button>
+        </el-form-item>
+      </el-form>
 
       <template #footer>
         <el-button @click="problemsDialog = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 上传测试数据对话框 -->
+    <el-dialog
+      v-model="uploadVisible"
+      :title="`上传测试数据 — ${uploadTarget?.label}: ${uploadTarget?.title ?? ''}`"
+      width="480px"
+      append-to-body
+    >
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom:16px">
+        压缩包格式：直接包含 1.in, 1.out, 2.in, 2.out … 的 .zip 文件
+      </el-alert>
+      <el-upload
+        drag
+        action="#"
+        accept=".zip"
+        :auto-upload="false"
+        :on-change="onUploadChange"
+        :limit="1"
+      >
+        <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+        <div class="el-upload__text">拖拽 .zip 文件到此，或 <em>点击选择</em></div>
+      </el-upload>
+      <template #footer>
+        <el-button @click="uploadVisible = false">取消</el-button>
+        <el-button type="primary" :loading="uploading" @click="doUpload">上传</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { ref, reactive, onMounted } from 'vue'
+import { Plus, Delete, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { FormInstance } from 'element-plus'
+import type { FormInstance, UploadFile } from 'element-plus'
 import dayjs from 'dayjs'
 import { contestApi, problemApi, adminApi } from '@/api/http'
-import type { Contest, Problem, ContestProblemSummary } from '@/types'
+import type { Contest, ContestProblemSummary } from '@/types'
 
 // ─── Main list ─────────────────────────────────────────────────────────────
 const contests = ref<Contest[]>([])
@@ -279,34 +306,38 @@ async function handleCreate() {
   } finally { creating.value = false }
 }
 
-// ─── Problem-linking dialog ───────────────────────────────────────────────
-const problemsDialog     = ref(false)
-const problemsTarget     = ref<Contest | null>(null)
-const linkedProblems     = ref<ContestProblemSummary[]>([])
-const loadingLinked      = ref(false)
-const allProblems        = ref<Problem[]>([])
-const loadingAllProblems = ref(false)
-const adding             = ref(false)
+// ─── Problem management dialog ────────────────────────────────────────────
+const problemsDialog = ref(false)
+const problemsTarget = ref<Contest | null>(null)
+const linkedProblems = ref<ContestProblemSummary[]>([])
+const loadingLinked  = ref(false)
+const creatingProb   = ref(false)
 
-const addForm = reactive({
-  problem_id: null as number | null,
-  label:      '',
-  max_score:  100,
-})
-
-// Hide problems already linked from the dropdown
-const availableProblems = computed(() => {
-  const linkedIds = new Set(linkedProblems.value.map(p => p.problem_id))
-  return allProblems.value.filter(p => !linkedIds.has(p.id))
+const newProb = reactive({
+  label:         '',
+  title:         '',
+  statement:     '',
+  judge_type:    'standard',
+  time_limit_ms: 2000,
+  mem_limit_kb:  262144,
+  max_score:     100,
 })
 
 async function openProblems(row: Contest) {
   problemsTarget.value = row
   problemsDialog.value = true
-  addForm.problem_id   = null
-  addForm.label        = suggestNextLabel()
-  addForm.max_score    = 100
-  await Promise.all([refreshLinked(), loadAllProblems()])
+  resetNewProb()
+  await refreshLinked()
+}
+
+function resetNewProb() {
+  newProb.label         = suggestNextLabel()
+  newProb.title         = ''
+  newProb.statement     = ''
+  newProb.judge_type    = 'standard'
+  newProb.time_limit_ms = 2000
+  newProb.mem_limit_kb  = 262144
+  newProb.max_score     = 100
 }
 
 async function refreshLinked() {
@@ -315,18 +346,8 @@ async function refreshLinked() {
   try {
     const data = await contestApi.getProblems(problemsTarget.value.id)
     linkedProblems.value = data.problems ?? []
-    addForm.label = suggestNextLabel()
+    newProb.label = suggestNextLabel()
   } finally { loadingLinked.value = false }
-}
-
-async function loadAllProblems() {
-  if (allProblems.value.length > 0) return // cache
-  loadingAllProblems.value = true
-  try {
-    // Load up to 200 problems — paginate if you have more
-    const data = await problemApi.list(1, 200)
-    allProblems.value = data.problems ?? []
-  } finally { loadingAllProblems.value = false }
 }
 
 // Suggest the next label: A, B, C, …, Z, AA, AB, …
@@ -339,19 +360,54 @@ function suggestNextLabel(): string {
   return ''
 }
 
-async function handleAddProblem() {
-  if (!problemsTarget.value || !addForm.problem_id || !addForm.label) return
-  adding.value = true
+async function handleCreateProblem() {
+  if (!problemsTarget.value || !newProb.title || !newProb.label) return
+  creatingProb.value = true
   try {
-    await contestApi.addProblem(problemsTarget.value.id, {
-      problem_id: addForm.problem_id,
-      label:      addForm.label,
-      max_score:  addForm.max_score,
+    await contestApi.createProblem(problemsTarget.value.id, {
+      label:         newProb.label,
+      title:         newProb.title,
+      statement:     newProb.statement,
+      judge_type:    newProb.judge_type,
+      time_limit_ms: newProb.time_limit_ms,
+      mem_limit_kb:  newProb.mem_limit_kb,
+      max_score:     newProb.max_score,
     })
-    ElMessage.success('题目已添加')
-    addForm.problem_id = null
+    ElMessage.success('题目已创建并加入比赛，记得上传测试数据')
     await refreshLinked()
-  } finally { adding.value = false }
+    resetNewProb()
+  } finally { creatingProb.value = false }
+}
+
+// ─── Testcase upload (per contest problem) ─────────────────────────────────
+const uploadVisible = ref(false)
+const uploadTarget  = ref<ContestProblemSummary | null>(null)
+const uploadFile    = ref<File | null>(null)
+const uploading     = ref(false)
+
+function openUpload(row: ContestProblemSummary) {
+  uploadTarget.value = row
+  uploadFile.value   = null
+  uploadVisible.value = true
+}
+
+function onUploadChange(file: UploadFile) {
+  uploadFile.value = file.raw ?? null
+}
+
+async function doUpload() {
+  if (!uploadTarget.value) return
+  if (!uploadFile.value) { ElMessage.warning('请先选择 .zip 文件'); return }
+  uploading.value = true
+  try {
+    const res = await problemApi.uploadTestcases(uploadTarget.value.problem_id, uploadFile.value)
+    ElMessage.success(`上传成功，已登记 ${res?.test_cases ?? 0} 个测试点`)
+    uploadVisible.value = false
+  } catch {
+    ElMessage.error('上传失败')
+  } finally {
+    uploading.value = false
+  }
 }
 
 async function handleRemoveProblem(row: ContestProblemSummary) {
@@ -408,10 +464,7 @@ onMounted(fetch)
   font-size: 12px;
 }
 
-.add-row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
+.newprob-form { max-width: 560px; }
+.unit { color: var(--oj-text-3); font-size: 12px; margin-left: 6px; }
 .empty-hint { color: var(--oj-text-3); font-size: 13px; }
 </style>

@@ -17,10 +17,20 @@ func (r *ProblemRepo) ListProblems(ctx context.Context, onlyPublic bool, limit, 
 	var args []any
 
 	if onlyPublic {
-		countQ = `SELECT COUNT(*) FROM problems WHERE is_public = true`
+		// A problem is visible in the public bank if it is explicitly public, OR
+		// it belongs to a contest that has already ended — contest problems are
+		// auto-published to the bank once their contest finishes.
+		const publicWhere = `
+WHERE is_public = true
+   OR EXISTS (
+        SELECT 1 FROM contest_problems cp
+        JOIN   contests c ON c.id = cp.contest_id
+        WHERE  cp.problem_id = problems.id AND c.end_time < NOW()
+      )`
+		countQ = `SELECT COUNT(*) FROM problems ` + publicWhere
 		listQ = `
 SELECT id, title, time_limit_ms, mem_limit_kb, judge_type, is_public, author_id, created_at, updated_at
-FROM problems WHERE is_public = true
+FROM problems ` + publicWhere + `
 ORDER BY id DESC LIMIT $1 OFFSET $2`
 		args = []any{limit, offset}
 	} else {
@@ -92,6 +102,39 @@ FROM problems WHERE id = $1`
 		}
 	}
 	return &p, nil
+}
+
+// CanNonAdminView reports whether a non-admin user may view a private problem.
+// A contest problem (is_public=false) is viewable when:
+//   - any contest containing it has ended (auto-published to everyone), OR
+//   - a contest containing it is currently running AND the contest is public
+//     or the user is a registered participant.
+// (Public problems never reach this query — the caller short-circuits them.)
+func (r *ProblemRepo) CanNonAdminView(ctx context.Context, problemID, userID models.ID, authed bool) (bool, error) {
+	const q = `
+SELECT EXISTS (
+  SELECT 1
+  FROM   contest_problems cp
+  JOIN   contests c ON c.id = cp.contest_id
+  WHERE  cp.problem_id = $1
+    AND (
+      c.end_time < NOW()
+      OR (
+        c.start_time <= NOW() AND NOW() <= c.end_time
+        AND (
+          c.is_public
+          OR ($2 AND EXISTS (
+                SELECT 1 FROM contest_participants p
+                WHERE p.contest_id = c.id AND p.user_id = $3))
+        )
+      )
+    )
+)`
+	var ok bool
+	if err := r.db.QueryRowContext(ctx, q, problemID, authed, userID).Scan(&ok); err != nil {
+		return false, fmt.Errorf("check problem %d visibility: %w", problemID, err)
+	}
+	return ok, nil
 }
 
 // CreateProblem inserts a new problem and back-fills ID, CreatedAt, UpdatedAt.

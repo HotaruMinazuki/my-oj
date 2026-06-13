@@ -200,6 +200,55 @@ VALUES ($1, $2, $3, $4, $5)`,
 	return tx.Commit()
 }
 
+// CreateContestProblem creates a new problem (is_public=false) and links it to
+// the contest in a single transaction. The problem becomes publicly visible in
+// the bank automatically once the contest ends (see ListProblems / CanNonAdminView).
+func (r *ContestRepo) CreateContestProblem(ctx context.Context, contestID models.ID, p *models.Problem, label string, maxScore, ordinal int) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	const insProblem = `
+INSERT INTO problems (title, statement, time_limit_ms, mem_limit_kb, judge_type,
+                      judge_config, allowed_langs, is_public, author_id)
+VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, NULL, FALSE, $6)
+RETURNING id, created_at, updated_at`
+	if err := tx.QueryRowContext(ctx, insProblem,
+		p.Title, p.Statement, p.TimeLimitMs, p.MemLimitKB, string(p.JudgeType), p.AuthorID,
+	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		return fmt.Errorf("insert contest problem: %w", err)
+	}
+	p.IsPublic = false
+
+	if ordinal <= 0 {
+		var maxOrd sql.NullInt64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT MAX(ordinal) FROM contest_problems WHERE contest_id=$1`, contestID,
+		).Scan(&maxOrd); err != nil {
+			return fmt.Errorf("query max ordinal: %w", err)
+		}
+		if maxOrd.Valid {
+			ordinal = int(maxOrd.Int64) + 1
+		} else {
+			ordinal = 1
+		}
+	}
+	if maxScore <= 0 {
+		maxScore = 100
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO contest_problems (contest_id, problem_id, label, max_score, ordinal)
+VALUES ($1, $2, $3, $4, $5)`,
+		contestID, p.ID, label, maxScore, ordinal,
+	); err != nil {
+		return fmt.Errorf("link contest problem: %w", err)
+	}
+	return tx.Commit()
+}
+
 // RemoveProblem deletes a problem from a contest. Returns nil if the row
 // did not exist (idempotent).
 func (r *ContestRepo) RemoveProblem(ctx context.Context, contestID, problemID models.ID) error {

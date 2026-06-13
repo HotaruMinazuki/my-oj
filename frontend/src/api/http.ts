@@ -101,6 +101,13 @@ export const contestApi = {
   addProblem: (contestId: number, data: { problem_id: number; label: string; max_score?: number; ordinal?: number }) =>
     http.post(`/admin/contests/${contestId}/problems`, data).then(r => r.data),
 
+  // Create a brand-new problem inside the contest (hidden until the contest ends).
+  createProblem: (contestId: number, data: {
+    label: string; title: string; statement?: string
+    judge_type?: string; time_limit_ms?: number; mem_limit_kb?: number; max_score?: number
+  }) =>
+    http.post<{ problem_id: number }>(`/admin/contests/${contestId}/problems`, data).then(r => r.data),
+
   removeProblem: (contestId: number, problemId: number) =>
     http.delete(`/admin/contests/${contestId}/problems/${problemId}`).then(r => r.data),
 }

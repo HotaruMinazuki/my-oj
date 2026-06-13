@@ -19,6 +19,9 @@ type ProblemListRepo interface {
 	ListProblems(ctx context.Context, onlyPublic bool, limit, offset int) ([]models.Problem, int, error)
 	GetProblemByID(ctx context.Context, id models.ID) (*models.Problem, error)
 	CreateProblem(ctx context.Context, p *models.Problem) error
+	// CanNonAdminView reports whether a non-admin may view a private (contest)
+	// problem now — true once its contest has ended, or while running for participants.
+	CanNonAdminView(ctx context.Context, problemID, userID models.ID, authed bool) (bool, error)
 }
 
 // ProblemHandler serves problem list and detail endpoints.
@@ -83,12 +86,22 @@ func (h *ProblemHandler) Get(c *gin.Context) {
 		return
 	}
 
-	// Non-admins cannot see private problems outside of a contest.
+	// Non-admins may see a private (contest) problem only when its contest is
+	// running (participants) or has ended (auto-published to everyone).
 	roleVal, _ := c.Get(string(middleware.ContextKeyUserRole))
 	role, _ := roleVal.(models.UserRole)
 	if !p.IsPublic && role != models.RoleAdmin {
-		c.JSON(http.StatusNotFound, gin.H{"error": "problem not found"})
-		return
+		uid, authed := middleware.UserIDFromCtx(c)
+		visible, err := h.problems.CanNonAdminView(c.Request.Context(), models.ID(id), uid, authed)
+		if err != nil {
+			h.log.Error("check problem visibility", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+		if !visible {
+			c.JSON(http.StatusNotFound, gin.H{"error": "problem not found"})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, p)
