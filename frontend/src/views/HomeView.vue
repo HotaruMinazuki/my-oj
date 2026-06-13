@@ -17,17 +17,6 @@
       </div>
     </section>
 
-    <!-- ── Stats row ── -->
-    <div class="stats-row">
-      <div v-for="s in stats" :key="s.label" class="stat-card">
-        <el-icon class="stat-icon" :style="{ color: s.color }">
-          <component :is="s.icon" />
-        </el-icon>
-        <div class="stat-value">{{ s.value }}</div>
-        <div class="stat-label">{{ s.label }}</div>
-      </div>
-    </div>
-
     <!-- ── Active / upcoming contests ── -->
     <section class="section">
       <div class="sec-head">
@@ -65,10 +54,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import {
-  EditPen, Trophy, ArrowRight,
-  DocumentCopy, UserFilled, CircleCheck,
-} from '@element-plus/icons-vue'
+import { EditPen, Trophy, ArrowRight } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { contestApi } from '@/api/http'
 import type { Contest } from '@/types'
@@ -76,19 +62,10 @@ import type { Contest } from '@/types'
 const contests        = ref<Contest[]>([])
 const loadingContests = ref(true)
 
-// Stats (populated from contest list; extend with real API if available)
-const stats = ref([
-  { icon: DocumentCopy, color: '#409eff', label: '题目',   value: '—' },
-  { icon: Trophy,       color: '#e6a23c', label: '比赛',   value: '—' },
-  { icon: UserFilled,   color: '#67c23a', label: '选手',   value: '—' },
-  { icon: CircleCheck,  color: '#f56c6c', label: '提交',   value: '—' },
-])
-
 onMounted(async () => {
   try {
     const data = await contestApi.list(1, 6)
     contests.value = data.contests ?? []
-    stats.value[1].value = String(data.total ?? contests.value.length)
   } finally {
     loadingContests.value = false
   }
@@ -152,27 +129,6 @@ function statusTagType(s: string): '' | 'success' | 'warning' | 'info' | 'danger
 }
 .hero-btns { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
 
-/* ── Stats ── */
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 32px;
-}
-.stat-card {
-  background: var(--oj-card-bg);
-  border: 1px solid var(--oj-border);
-  border-radius: var(--oj-radius-lg);
-  padding: 20px;
-  text-align: center;
-  box-shadow: var(--oj-shadow-sm);
-  transition: box-shadow .15s;
-}
-.stat-card:hover { box-shadow: var(--oj-shadow); }
-.stat-icon  { font-size: 28px; margin-bottom: 8px; }
-.stat-value { font-size: 26px; font-weight: 700; color: var(--oj-text); }
-.stat-label { font-size: 12px; color: var(--oj-text-3); margin-top: 2px; }
-
 /* ── Sections ── */
 .section { margin-bottom: 32px; }
 .sec-head  { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
@@ -201,10 +157,6 @@ function statusTagType(s: string): '' | 'success' | 'warning' | 'info' | 'danger
 
 /* ── Responsive ── */
 @media (max-width: 900px) {
-  .stats-row { grid-template-columns: repeat(2, 1fr); }
   .hero-title { font-size: 28px; }
-}
-@media (max-width: 600px) {
-  .stats-row { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
