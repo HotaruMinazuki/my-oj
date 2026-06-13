@@ -28,6 +28,9 @@
             <router-link :to="`/contests/${row.id}`">
               <el-button size="small" plain>查看</el-button>
             </router-link>
+            <el-button size="small" plain :loading="exportingId === row.id" @click="exportXml(row)">
+              滚榜XML
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -180,7 +183,7 @@ import { Plus, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import dayjs from 'dayjs'
-import { contestApi, problemApi } from '@/api/http'
+import { contestApi, problemApi, adminApi } from '@/api/http'
 import type { Contest, Problem, ContestProblemSummary } from '@/types'
 
 // ─── Main list ─────────────────────────────────────────────────────────────
@@ -196,6 +199,20 @@ async function fetch() {
     contests.value = data.contests ?? []
     total.value    = data.total    ?? 0
   } finally { loading.value = false }
+}
+
+// ─── Resolver XML export ──────────────────────────────────────────────────
+const exportingId = ref<number | null>(null)
+async function exportXml(row: Contest) {
+  exportingId.value = row.id
+  try {
+    await adminApi.exportResolverXml(row.id)
+    ElMessage.success('已导出 event-feed.xml，可直接喂给滚榜工具')
+  } catch {
+    ElMessage.error('导出失败')
+  } finally {
+    exportingId.value = null
+  }
 }
 
 // ─── Create contest dialog ────────────────────────────────────────────────

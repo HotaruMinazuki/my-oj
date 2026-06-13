@@ -210,6 +210,42 @@ LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
 	return out, total, rows.Err()
 }
 
+// FeedSubmission is the minimal submission shape for the resolver XML export.
+type FeedSubmission struct {
+	ID        models.ID
+	UserID    models.ID
+	ProblemID models.ID
+	Status    models.SubmissionStatus
+	CreatedAt time.Time
+}
+
+// ListForFeed returns every submission of a contest in chronological order,
+// for building the resolver event feed. Not paginated — a contest's submission
+// count is bounded and the export is an admin, on-demand operation.
+func (r *SubmissionRepo) ListForFeed(ctx context.Context, contestID models.ID) ([]FeedSubmission, error) {
+	const q = `
+SELECT id, user_id, problem_id, status, created_at
+FROM   submissions
+WHERE  contest_id = $1
+ORDER  BY created_at, id`
+
+	rows, err := r.db.QueryContext(ctx, q, contestID)
+	if err != nil {
+		return nil, fmt.Errorf("list feed submissions for contest %d: %w", contestID, err)
+	}
+	defer rows.Close()
+
+	var out []FeedSubmission
+	for rows.Next() {
+		var s FeedSubmission
+		if err := rows.Scan(&s.ID, &s.UserID, &s.ProblemID, &s.Status, &s.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan feed submission: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // UserSubmissionStats summarises one user's judging history for profile pages.
 type UserSubmissionStats struct {
 	Total    int `json:"total"`

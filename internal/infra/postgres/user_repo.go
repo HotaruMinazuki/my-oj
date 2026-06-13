@@ -86,6 +86,20 @@ LIMIT $2 OFFSET $3`
 	return out, total, rows.Err()
 }
 
+// UpdateProfile updates the user-editable profile fields (currently the
+// organization / 学校单位, used as the affiliation in the resolver XML export).
+func (r *UserRepo) UpdateProfile(ctx context.Context, id models.ID, organization string) error {
+	const q = `UPDATE users SET organization = $2, updated_at = NOW() WHERE id = $1`
+	res, err := r.db.ExecContext(ctx, q, id, organization)
+	if err != nil {
+		return fmt.Errorf("update profile for user %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("user %d not found", id)
+	}
+	return nil
+}
+
 func (r *UserRepo) GetByID(ctx context.Context, id models.ID) (*models.User, error) {
 	const q = `
 SELECT id, username, email, password_hash, role, organization, created_at, updated_at

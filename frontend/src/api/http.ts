@@ -129,6 +129,10 @@ export const userApi = {
 
   contests: (id: number) =>
     http.get<{ contests: Contest[] }>(`/users/${id}/contests`).then(r => r.data),
+
+  // Edit own profile (organization / 学校单位).
+  updateMe: (data: { organization: string }) =>
+    http.put<{ organization: string }>('/users/me', data).then(r => r.data),
 }
 
 // ─── Admin API (用户管理 / 全部提交) ──────────────────────────────────────────
@@ -143,4 +147,18 @@ export const adminApi = {
   } = {}) =>
     http.get<{ submissions: SubmissionListItem[]; total: number }>(
       '/admin/submissions', { params }).then(r => r.data),
+
+  // Download the resolver (滚榜) event-feed XML for a contest. Uses the axios
+  // instance so the admin JWT is attached, then triggers a browser download.
+  exportResolverXml: async (contestId: number) => {
+    const res = await http.get(`/admin/contests/${contestId}/resolver.xml`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data as Blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `contest-${contestId}-event-feed.xml`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
 }

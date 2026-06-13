@@ -31,8 +31,25 @@
               <div class="stat-label">总提交</div>
             </div>
           </div>
+
+          <el-button v-if="isMe" size="small" plain :icon="Edit" class="edit-btn" @click="openEdit">
+            编辑资料
+          </el-button>
         </div>
       </el-card>
+
+      <!-- 编辑资料对话框 -->
+      <el-dialog v-model="editVisible" title="编辑个人信息" width="440px">
+        <el-form label-width="90px">
+          <el-form-item label="学校/单位">
+            <el-input v-model="editOrg" maxlength="100" placeholder="用于比赛排行榜与滚榜展示" show-word-limit />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="editVisible = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="saveProfile">保存</el-button>
+        </template>
+      </el-dialog>
 
       <!-- ── 历史记录 ── -->
       <el-card shadow="never" class="history-card">
@@ -110,14 +127,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { Edit } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { userApi } from '@/api/http'
+import { useAuthStore } from '@/stores/auth'
 import type { Contest, SubmissionListItem, UserPublic, UserSubmissionStats } from '@/types'
 
 const route  = useRoute()
 const router = useRouter()
+const auth   = useAuthStore()
+
+const isMe = computed(() => auth.user?.id != null && auth.user.id === Number(route.params.id))
 
 const user    = ref<UserPublic | null>(null)
 const stats   = ref<UserSubmissionStats | null>(null)
@@ -132,6 +155,35 @@ const subTotal     = ref(0)
 
 const contests        = ref<Contest[]>([])
 const loadingContests = ref(false)
+
+// ── Profile edit (own profile only) ─────────────────────────────────────────
+const editVisible = ref(false)
+const editOrg     = ref('')
+const saving      = ref(false)
+
+function openEdit() {
+  editOrg.value = user.value?.organization ?? ''
+  editVisible.value = true
+}
+
+async function saveProfile() {
+  saving.value = true
+  try {
+    const res = await userApi.updateMe({ organization: editOrg.value.trim() })
+    if (user.value) user.value.organization = res.organization
+    // Keep the auth store / localStorage copy in sync.
+    if (auth.user) {
+      auth.user.organization = res.organization
+      localStorage.setItem('oj_user', JSON.stringify(auth.user))
+    }
+    editVisible.value = false
+    ElMessage.success('已保存')
+  } catch {
+    ElMessage.error('保存失败')
+  } finally {
+    saving.value = false
+  }
+}
 
 async function fetchProfile() {
   loading.value = true
@@ -225,6 +277,7 @@ watch(() => route.params.id, () => {
 .profile-sub { color: var(--oj-text-3); font-size: 13px; margin-top: 4px; }
 
 .profile-stats { display: flex; gap: 28px; }
+.edit-btn { flex-shrink: 0; }
 .stat { text-align: center; }
 .stat-num   { font-size: 22px; font-weight: 700; color: var(--oj-primary); }
 .stat-num.ac { color: var(--oj-success); }

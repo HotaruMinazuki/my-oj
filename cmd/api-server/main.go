@@ -169,9 +169,11 @@ func main() {
 		problemRepo,   // ... and TestcaseAdminRepo
 		userRepo,
 		contestRepo,
-		userRepo,       // UserDirectoryRepo: profiles + admin search
+		userRepo,       // UserDirectoryRepo: profiles + admin search + edit
 		submissionRepo, // SubmissionHistoryRepo: history listings + stats
 		contestRepo,    // ContestHistoryRepo: per-user contest records
+		contestRepo,    // ResolverContestRepo: contest/problems/teams for export
+		submissionRepo, // ResolverSubmissionRepo: runs for export
 		log,
 	)
 

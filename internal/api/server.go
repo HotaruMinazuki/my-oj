@@ -51,6 +51,8 @@ func NewServer(
 	userDirectory handler.UserDirectoryRepo,
 	submissionHistory handler.SubmissionHistoryRepo,
 	contestHistory handler.ContestHistoryRepo,
+	resolverContests handler.ResolverContestRepo,
+	resolverSubmissions handler.ResolverSubmissionRepo,
 	log *zap.Logger,
 ) *Server {
 	if cfg.ReadTimeout == 0 {
@@ -95,6 +97,7 @@ func NewServer(
 	problemH    := handler.NewProblemHandler(problemList, log)
 	contestH    := handler.NewContestHandler(contests, log)
 	userH       := handler.NewUserHandler(userDirectory, submissionHistory, contestHistory, log)
+	resolverH   := handler.NewResolverHandler(resolverContests, resolverSubmissions, log)
 
 	auth      := middleware.Auth(cfg.JWTSigningKey)
 	adminOnly := middleware.RequireRole(models.RoleAdmin)
@@ -135,6 +138,9 @@ func NewServer(
 		// Authenticated routes
 		authed := v1.Group("/", auth)
 		{
+			// Edit own profile (organization/学校, used by resolver export).
+			authed.PUT("/users/me", userH.UpdateMe)
+
 			authed.POST("/contests/:contest_id/register", contestH.RegisterParticipant)
 
 			// Contest submissions
@@ -161,6 +167,9 @@ func NewServer(
 			// User management & global submission history
 			admin.GET("/users", userH.AdminSearchUsers)
 			admin.GET("/submissions", userH.AdminListSubmissions)
+
+			// Resolver (滚榜) event-feed XML export
+			admin.GET("/contests/:contest_id/resolver.xml", resolverH.ExportEventFeed)
 		}
 	}
 

@@ -134,26 +134,23 @@ func (h *ContestHandler) GetProblems(c *gin.Context) {
 	role, _ := roleVal.(models.UserRole)
 	uid, authed := middleware.UserIDFromCtx(c)
 
-	if role != models.RoleAdmin {
-		if contest.Status == models.ContestStatusDraft {
-			c.JSON(http.StatusNotFound, gin.H{"error": "contest not found"})
+	// Visibility: admins always; public contests to everyone; private contests
+	// only to registered participants. (Status is time-derived now, so there is
+	// no permanent "draft" state to block on.)
+	if role != models.RoleAdmin && !contest.IsPublic {
+		if !authed {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 			return
 		}
-		if !contest.IsPublic {
-			if !authed {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
-				return
-			}
-			registered, err := h.contests.IsRegistered(ctx, id, uid)
-			if err != nil {
-				h.log.Error("check registration", zap.Error(err))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-				return
-			}
-			if !registered {
-				c.JSON(http.StatusForbidden, gin.H{"error": "not a participant of this contest"})
-				return
-			}
+		registered, err := h.contests.IsRegistered(ctx, id, uid)
+		if err != nil {
+			h.log.Error("check registration", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+		if !registered {
+			c.JSON(http.StatusForbidden, gin.H{"error": "not a participant of this contest"})
+			return
 		}
 	}
 

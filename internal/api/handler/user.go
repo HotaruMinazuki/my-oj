@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -14,10 +15,11 @@ import (
 
 // ─── Repository contracts ─────────────────────────────────────────────────────
 
-// UserDirectoryRepo provides user lookup and admin search.
+// UserDirectoryRepo provides user lookup, admin search, and profile updates.
 type UserDirectoryRepo interface {
 	GetByID(ctx context.Context, id models.ID) (*models.User, error)
 	Search(ctx context.Context, q string, limit, offset int) ([]models.User, int, error)
+	UpdateProfile(ctx context.Context, id models.ID, organization string) error
 }
 
 // SubmissionHistoryRepo lists submissions (newest first) and per-user stats.
@@ -90,6 +92,38 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 		},
 		"stats": stats,
 	})
+}
+
+// ─── PUT /api/v1/users/me ─────────────────────────────────────────────────────
+
+type updateProfileReq struct {
+	Organization string `json:"organization"`
+}
+
+// UpdateMe lets the authenticated user edit their own profile. The organization
+// (学校/单位) is shown on the profile and used as the team affiliation in the
+// contest resolver XML export.
+func (h *UserHandler) UpdateMe(c *gin.Context) {
+	uid, ok := mustUserID(c)
+	if !ok {
+		return
+	}
+	var req updateProfileReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len([]rune(req.Organization)) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "organization too long (max 100 chars)"})
+		return
+	}
+
+	if err := h.users.UpdateProfile(c.Request.Context(), uid, strings.TrimSpace(req.Organization)); err != nil {
+		h.log.Error("update profile", zap.Error(err), zap.Int64("user_id", uid))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"organization": strings.TrimSpace(req.Organization)})
 }
 
 // ─── GET /api/v1/users/:id/submissions ────────────────────────────────────────

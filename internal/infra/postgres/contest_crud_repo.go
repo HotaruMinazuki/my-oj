@@ -213,6 +213,46 @@ func (r *ContestRepo) RemoveProblem(ctx context.Context, contestID, problemID mo
 	return nil
 }
 
+// ─── Teams (for resolver export) ──────────────────────────────────────────────
+
+// ContestTeam is one scoreboard participant in the resolver feed.
+type ContestTeam struct {
+	UserID       models.ID `json:"user_id"`
+	Username     string    `json:"username"`
+	Organization string    `json:"organization"`
+}
+
+// ListContestTeams returns every user that should appear on the contest's
+// scoreboard: registered participants UNION anyone who submitted to the contest.
+// (A run must reference a known team, so submitters are always included.)
+func (r *ContestRepo) ListContestTeams(ctx context.Context, contestID models.ID) ([]ContestTeam, error) {
+	const q = `
+SELECT u.id, u.username, u.organization
+FROM users u
+WHERE u.id IN (
+    SELECT user_id FROM contest_participants WHERE contest_id = $1
+    UNION
+    SELECT user_id FROM submissions          WHERE contest_id = $1
+)
+ORDER BY u.id`
+
+	rows, err := r.db.QueryContext(ctx, q, contestID)
+	if err != nil {
+		return nil, fmt.Errorf("list contest %d teams: %w", contestID, err)
+	}
+	defer rows.Close()
+
+	var out []ContestTeam
+	for rows.Next() {
+		var t ContestTeam
+		if err := rows.Scan(&t.UserID, &t.Username, &t.Organization); err != nil {
+			return nil, fmt.Errorf("scan contest team: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // ─── Register ─────────────────────────────────────────────────────────────────
 
 func (r *ContestRepo) Register(ctx context.Context, contestID, userID models.ID) error {
@@ -285,5 +325,8 @@ func scanContest(row rowScanner) (*models.Contest, error) {
 		t := freezeTime.Time
 		c.FreezeTime = &t
 	}
+	// Override the stored status with the time-derived phase so the UI shows the
+	// real state (ready/running/frozen/ended) instead of the stale "draft".
+	c.Status = c.EffectiveStatus(time.Now().UTC())
 	return &c, nil
 }

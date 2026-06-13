@@ -60,6 +60,24 @@ type Contest struct {
 	UpdatedAt   time.Time `db:"updated_at"   json:"updated_at"`
 }
 
+// EffectiveStatus derives the live lifecycle phase from the contest's
+// timestamps instead of trusting the stored column. The stored status is only
+// "draft" at creation and is never transitioned, so display/visibility must be
+// time-based: before start → ready, within the freeze window → frozen,
+// after end → ended, otherwise running.
+func (c *Contest) EffectiveStatus(now time.Time) ContestStatus {
+	switch {
+	case !c.StartTime.IsZero() && now.Before(c.StartTime):
+		return ContestStatusReady
+	case !c.EndTime.IsZero() && !now.Before(c.EndTime):
+		return ContestStatusEnded
+	case c.FreezeTime != nil && !now.Before(*c.FreezeTime):
+		return ContestStatusFrozen
+	default:
+		return ContestStatusRunning
+	}
+}
+
 // ContestProblem links a Problem to a Contest with contest-specific overrides.
 type ContestProblem struct {
 	ContestID ID `db:"contest_id" json:"contest_id"`
