@@ -25,7 +25,7 @@
               在「比赛管理」中创建比赛，关联题目，设置封榜时间
             </el-timeline-item>
             <el-timeline-item timestamp="Step 4" placement="top">
-              比赛结束后，在比赛列表点击「滚榜」逐步解封排行
+              比赛结束后排行榜自动解封，显示完整成绩
             </el-timeline-item>
           </el-timeline>
         </el-card>

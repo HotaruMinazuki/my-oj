@@ -283,34 +283,24 @@ func (h *Hub) runPubSubOnce(ctx context.Context, pattern string) error {
 	}
 }
 
-// dispatchPubSubMsg parses the channel name to extract the contest ID, then
-// wraps the delta payload in a typed envelope and queues it for broadcast.
+// dispatchPubSubMsg parses the channel name to extract the contest ID and
+// queues the payload for broadcast. The payload published by the RankingService
+// is already a complete WS frame ({"type":"snapshot","data":{…}}), so it is
+// forwarded verbatim.
 //
 // Channel name format: "oj:ranking:{contestID}:events"
 func (h *Hub) dispatchPubSubMsg(msg *redis.Message) {
-	// Parse contestID from channel name.
-	// "oj:ranking:{contestID}:events" → split by ":" → index 2
 	var contestID models.ID
 	if _, err := fmt.Sscanf(msg.Channel, "oj:ranking:%d:events", &contestID); err != nil {
 		h.log.Warn("malformed ranking channel name", zap.String("channel", msg.Channel))
 		return
 	}
 
-	// Wrap the raw delta in a typed envelope:
-	// {"type": "delta", "data": {…RankDelta…}}
-	envelope, err := json.Marshal(map[string]any{
-		"type": EventSubmission, // refined inside data
-		"data": json.RawMessage(msg.Payload),
-	})
-	if err != nil {
-		return
-	}
-
 	// Non-blocking send to broadcast channel.
 	select {
-	case h.broadcast <- &broadcastMsg{contestID: contestID, payload: envelope}:
+	case h.broadcast <- &broadcastMsg{contestID: contestID, payload: []byte(msg.Payload)}:
 	default:
-		h.log.Warn("hub broadcast channel full; delta dropped",
+		h.log.Warn("hub broadcast channel full; update dropped",
 			zap.Int64("contest_id", contestID))
 	}
 }

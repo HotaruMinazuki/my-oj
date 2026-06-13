@@ -27,7 +27,6 @@ const router = createRouter({
             { path: 'contests',  name: 'admin-contests', component: () => import('@/views/admin/AdminContests.vue') },
             { path: 'users',       name: 'admin-users',       component: () => import('@/views/admin/AdminUsers.vue') },
             { path: 'submissions', name: 'admin-submissions', component: () => import('@/views/admin/AdminSubmissions.vue') },
-            { path: 'contests/:id/unfreeze', name: 'admin-unfreeze', component: () => import('@/views/admin/AdminUnfreeze.vue') },
           ]
         }
       ]

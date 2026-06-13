@@ -152,8 +152,9 @@ function connect() {
   ws.onmessage = (ev: MessageEvent) => {
     try {
       const msg = JSON.parse(ev.data)
+      // The server pushes a full board snapshot on connect and after every
+      // scoreboard change, so the client just replaces its state each time.
       if (msg.type === 'snapshot') applySnapshot(msg.data)
-      else if (msg.type === 'delta') applyDelta(msg.data)
     } catch { /* ignore */ }
   }
 }
@@ -163,13 +164,6 @@ function applySnapshot(data: any) {
   problemLabels.value = data.problems    ?? []
   frozen.value        = data.frozen      ?? false
   loading.value       = false
-}
-
-function applyDelta(data: any) {
-  const idx = rows.value.findIndex(r => r.user_id === data.user_id)
-  if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...data }
-  else           rows.value.push(data)
-  rows.value.sort((a, b) => a.rank - b.rank)
 }
 
 function rowClass({ row }: { row: Row }) {

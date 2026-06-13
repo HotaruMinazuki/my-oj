@@ -144,8 +144,9 @@ func (s *ICPCStrategy) IsFinalised(entry *ScoreEntry, _ ContestSettings) bool {
 // RevealNext pops the earliest frozen submission for this entry and applies its
 // result to the public scoreboard.
 //
-// Called by RankingService.UnfreezeNext() during the post-contest ceremony.
-// Returns (updated entry, changed) where changed = true if the public score changed.
+// Called by the RankingService when auto-revealing frozen results after a
+// contest ends. Returns (updated entry, changed) where changed = true if the
+// public score changed.
 func (s *ICPCStrategy) RevealNext(
 	entry *ScoreEntry,
 	contestStart time.Time,

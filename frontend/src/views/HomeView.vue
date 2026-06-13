@@ -5,7 +5,7 @@
       <div class="hero-inner">
         <div class="hero-badge">ICPC / OI / IOI 多赛制</div>
         <h1 class="hero-title">在线算法评测系统</h1>
-        <p class="hero-sub">多语言沙盒评测 · 实时 WebSocket 排行榜 · 封榜 & 滚榜</p>
+        <p class="hero-sub">多语言沙盒评测 · 实时 WebSocket 排行榜 · 多赛制支持</p>
         <div class="hero-btns">
           <router-link to="/problems">
             <el-button type="primary" size="large" :icon="EditPen">开始刷题</el-button>
@@ -60,58 +60,18 @@
       </div>
     </section>
 
-    <!-- ── Supported languages ── -->
-    <section class="section">
-      <div class="sec-head">
-        <h3 class="sec-title"><el-icon><Monitor /></el-icon> 支持的语言</h3>
-      </div>
-      <div class="lang-grid">
-        <div v-for="l in LANGUAGES" :key="l.name" class="lang-pill">
-          <span class="lang-dot" :style="{ background: l.color }" />
-          {{ l.name }}
-        </div>
-      </div>
-    </section>
-
-    <!-- ── Feature highlights ── -->
-    <section class="section features">
-      <div v-for="f in features" :key="f.title" class="feature-card">
-        <el-icon class="feat-icon" :style="{ color: f.color }">
-          <component :is="f.icon" />
-        </el-icon>
-        <div class="feat-title">{{ f.title }}</div>
-        <div class="feat-desc">{{ f.desc }}</div>
-      </div>
-    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import {
-  EditPen, Trophy, ArrowRight, Monitor,
-  DocumentCopy, Histogram, UserFilled, CircleCheck, Timer, Lock,
+  EditPen, Trophy, ArrowRight,
+  DocumentCopy, UserFilled, CircleCheck,
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { contestApi } from '@/api/http'
 import type { Contest } from '@/types'
-
-const LANGUAGES = [
-  { name: 'C',       color: '#5c6bc0' },
-  { name: 'C++17',   color: '#26c6da' },
-  { name: 'C++20',   color: '#00acc1' },
-  { name: 'Java 21', color: '#ef5350' },
-  { name: 'Python 3',color: '#ffa726' },
-  { name: 'Go',      color: '#26a69a' },
-  { name: 'Rust',    color: '#8d6e63' },
-]
-
-const features = [
-  { icon: CircleCheck, color: '#67c23a', title: '实时评测',   desc: '沙盒隔离，毫秒级返回，支持 special judge 和交互题' },
-  { icon: Histogram,   color: '#409eff', title: 'WebSocket 排行', desc: '增量推送，封榜/滚榜，可视化高亮当前用户' },
-  { icon: Lock,        color: '#e6a23c', title: '封榜 & 滚榜', desc: 'ICPC 风格最后一小时封榜，管理员一键逐行解冻' },
-  { icon: Timer,       color: '#f56c6c', title: '多赛制支持', desc: 'ICPC / OI / IOI，灵活配置罚时与计分规则' },
-]
 
 const contests        = ref<Contest[]>([])
 const loadingContests = ref(true)
@@ -239,44 +199,12 @@ function statusTagType(s: string): '' | 'success' | 'warning' | 'info' | 'danger
 .hc-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--oj-text-3); font-size: 13px; }
 .hc-arrow { font-size: 12px; }
 
-/* ── Languages ── */
-.lang-grid  { display: flex; flex-wrap: wrap; gap: 10px; }
-.lang-pill  {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  background: var(--oj-card-bg);
-  border: 1px solid var(--oj-border);
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 500;
-}
-.lang-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-
-/* ── Features ── */
-.features    { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.feature-card {
-  background: var(--oj-card-bg);
-  border: 1px solid var(--oj-border);
-  border-radius: var(--oj-radius-lg);
-  padding: 20px;
-  box-shadow: var(--oj-shadow-sm);
-  transition: box-shadow .15s;
-}
-.feature-card:hover { box-shadow: var(--oj-shadow); }
-.feat-icon  { font-size: 26px; margin-bottom: 10px; }
-.feat-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
-.feat-desc  { font-size: 13px; color: var(--oj-text-3); line-height: 1.6; }
-
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
-  .features  { grid-template-columns: repeat(2, 1fr); }
   .hero-title { font-size: 28px; }
 }
 @media (max-width: 600px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
-  .features  { grid-template-columns: 1fr; }
 }
 </style>

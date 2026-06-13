@@ -16,17 +16,15 @@ func redisKey(contestID models.ID, suffix string) string {
 	return fmt.Sprintf("oj:ranking:%d:%s", contestID, suffix)
 }
 
-// Key constants (use via redisKey(cid, KeyXxx)).
+// Key constants (use via redisKey(cid, keyXxx)).
 const (
 	// keyEntries is a Redis Hash: field = "{uid}:{pid}" → ScoreEntry JSON
 	keyEntries = "entries"
-	// keyAggregates is a Redis Hash: field = "{uid}" → UserAggregate JSON
-	keyAggregates = "aggregates"
-	// keyBoard is a Redis Sorted Set: member = "{uid}", score = composite ranking key
-	keyBoard = "board"
-	// keySnapshot is a Redis String: full JSON of the current RankSnapshot
+	// keySnapshot is a Redis String holding the latest BoardSnapshot JSON.
+	// Read by the REST endpoint and on WebSocket connect.
 	keySnapshot = "snapshot"
-	// keyEvents is the Redis Pub/Sub channel name for this contest's delta stream
+	// keyEvents is the Redis Pub/Sub channel for this contest's board updates.
+	// Payloads are full pre-serialised WS frames: {"type":"snapshot","data":{…}}.
 	keyEvents = "events"
 	// keyFirstBlood is a Redis Hash: field = "{pid}" → "1" (set when first blood lands)
 	keyFirstBlood = "firstblood"
@@ -37,104 +35,45 @@ func entryField(userID, problemID models.ID) string {
 	return fmt.Sprintf("%d:%d", userID, problemID)
 }
 
-// boardScore converts a user's rank stats into a single comparable Redis
-// sorted-set score.  Higher score = better rank.
-//
-//	score = solved * 1_000_000 - penalty_minutes
-//
-// This is monotone in both keys and works for any realistic contest.
-func boardScore(solved, penaltyMinutes int) float64 {
-	return float64(solved*1_000_000 - penaltyMinutes)
-}
-
-// ─── Delta (incremental scoreboard event) ────────────────────────────────────
-
-// EventType classifies a RankDelta for client-side rendering.
+// EventType classifies a WS frame for client-side rendering.
 type EventType string
 
 const (
-	EventSubmission EventType = "submission" // a judged submission changed an entry
-	EventFirstBlood EventType = "firstblood" // first team to solve a problem
-	EventUnfreeze   EventType = "unfreeze"   // 滚榜: one frozen result revealed
-	EventSnapshot   EventType = "snapshot"   // full board on initial connect
+	// EventSnapshot carries the full board. Sent on connect and after every
+	// scoreboard change — at this scale a full snapshot is small and pushing it
+	// keeps the client trivially consistent (no delta-merge bugs).
+	EventSnapshot EventType = "snapshot"
 )
 
-// RankDelta is the small JSON payload pushed over WebSocket on every scoreboard change.
-// Designed to be < 512 bytes so thousands of concurrent sends are bandwidth-cheap.
-type RankDelta struct {
-	Type      EventType `json:"type"`
-	ContestID models.ID `json:"contest_id"`
-	Timestamp time.Time `json:"ts"`
+// ─── Board snapshot (client-facing; shape consumed by RankingBoard.vue) ───────
 
-	// Which (user, problem) changed.
-	UserID    models.ID `json:"user_id"`
-	ProblemID models.ID `json:"problem_id"`
-
-	// Problem-level change.
-	OldStatus string `json:"old_status"` // "none" | "wa" | "ac" | "pending"
-	NewStatus string `json:"new_status"`
-
-	// User aggregate after the change.
-	NewSolved  int `json:"new_solved"`
-	NewPenalty int `json:"new_penalty"`
-
-	// Rank change.
-	OldRank int `json:"old_rank"`
-	NewRank int `json:"new_rank"`
+// BoardCell is one (user, problem) cell on the rendered scoreboard.
+type BoardCell struct {
+	Solved     bool `json:"solved"`
+	Attempts   int  `json:"attempts"` // submissions counted on the public board
+	Pending    int  `json:"pending"`  // frozen submissions (shown as "?")
+	Penalty    int  `json:"penalty"`  // ICPC: minutes incl. WA penalty; OI: 0
+	Score      int  `json:"score"`    // OI/IOI display score; ICPC: 0/1
+	FirstBlood bool `json:"first_blood,omitempty"`
 }
 
-// entryStatus returns the short status string sent in a RankDelta.
-func entryStatus(e *ScoreEntryView) string {
-	if e == nil {
-		return "none"
-	}
-	if e.Accepted {
-		return "ac"
-	}
-	if e.IsPending {
-		return "pending"
-	}
-	if e.AttemptCount > 0 {
-		return "wa"
-	}
-	return "none"
+// BoardRow is one contestant's row.
+type BoardRow struct {
+	Rank         int                  `json:"rank"`
+	UserID       models.ID            `json:"user_id"`
+	Username     string               `json:"username"`
+	Organization string               `json:"organization,omitempty"`
+	Problems     map[string]BoardCell `json:"problems"` // keyed by display label ("A", "B", …)
+	TotalSolved  int                  `json:"total_solved"`
+	TotalPenalty int                  `json:"total_penalty"`
+	TotalScore   int                  `json:"total_score"` // OI/IOI total points
 }
 
-// ─── Snapshot (full board, sent on initial WebSocket connect) ─────────────────
-
-// ScoreEntryView is the client-facing view of a ScoreEntry (no frozen internals).
-type ScoreEntryView struct {
-	Accepted          bool      `json:"accepted"`
-	DisplayScore      int       `json:"display_score"`
-	Penalty           int       `json:"penalty"`
-	AttemptCount      int       `json:"attempt_count"`
-	WrongAttemptCount int       `json:"wrong_attempt_count"`
-	BestSubmitTime    time.Time `json:"best_submit_time,omitempty"`
-	IsPending         bool      `json:"is_pending,omitempty"`
-	FrozenAttempts    int       `json:"frozen_attempts,omitempty"`
-	IsFirstBlood      bool      `json:"is_first_blood,omitempty"`
-}
-
-// RankRowView is one ranked row in the snapshot or a full-board response.
-type RankRowView struct {
-	Rank         int                        `json:"rank"`
-	UserID       models.ID                  `json:"user_id"`
-	TotalScore   int                        `json:"total_score"`
-	TotalPenalty int                        `json:"total_penalty"`
-	Entries      map[models.ID]*ScoreEntryView `json:"entries"` // keyed by problemID
-}
-
-// RankSnapshot is the full board payload sent to a client on connection.
-type RankSnapshot struct {
-	ContestID models.ID     `json:"contest_id"`
-	Rows      []RankRowView `json:"rows"`
-	UpdatedAt time.Time     `json:"updated_at"`
-}
-
-// UserAggregate is the per-user summary cached in Redis for fast rank computation.
-type UserAggregate struct {
-	UserID       models.ID `json:"user_id"`
-	Solved       int       `json:"solved"`
-	PenaltyMins  int       `json:"penalty_mins"`
-	LastACTime   time.Time `json:"last_ac_time,omitempty"`
+// BoardSnapshot is the full board payload.
+type BoardSnapshot struct {
+	ContestID   models.ID  `json:"contest_id"`
+	Frozen      bool       `json:"frozen"`
+	Problems    []string   `json:"problems"` // ordered display labels
+	Contestants []BoardRow `json:"contestants"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }

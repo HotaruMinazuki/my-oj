@@ -140,11 +140,13 @@ func main() {
 	userRepo       := postgres.NewUserRepo(db)
 	contestRepo    := postgres.NewContestRepo(db)
 	contestLoader  := postgres.NewContestMetaLoader(db)
+	problemsLoader := postgres.NewContestProblemsLoader(db)
+	usernamesLoader := postgres.NewUsernamesLoader(db)
 
 	// ── Strategy registry + ranking pipeline ──────────────────────────────────
 	registry := contest.NewRegistry()
 	rankingService := ranking.NewRankingService(
-		rankConsumer, rdb, registry, contestLoader, log,
+		rankConsumer, rdb, registry, contestLoader, problemsLoader, usernamesLoader, log,
 	)
 	hub := ranking.NewHub(rdb, log)
 
@@ -160,7 +162,6 @@ func main() {
 		rdb,
 		publisher,
 		store,
-		rankingService,
 		hub,
 		submissionRepo,
 		problemRepo,

@@ -28,9 +28,6 @@
             <router-link :to="`/contests/${row.id}`">
               <el-button size="small" plain>查看</el-button>
             </router-link>
-            <router-link :to="`/admin/contests/${row.id}/unfreeze`">
-              <el-button size="small" type="warning">滚榜</el-button>
-            </router-link>
           </template>
         </el-table-column>
       </el-table>

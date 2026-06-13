@@ -41,7 +41,6 @@ func NewServer(
 	rdb *redis.Client,
 	publisher mq.Publisher,
 	store storage.ObjectStore,
-	rankingService *ranking.RankingService,
 	hub *ranking.Hub,
 	submissions handler.SubmissionRepo,
 	problems handler.ProblemRepo,
@@ -91,7 +90,7 @@ func NewServer(
 	// ── Handlers ───────────────────────────────────────────────────────────────
 	rankingH    := handler.NewRankingHandler(hub, rdb, log)
 	submissionH := handler.NewSubmissionHandler(submissions, problems, contests, publisher, store, log)
-	adminH      := handler.NewAdminHandler(rankingService, store, testcases, log)
+	adminH      := handler.NewAdminHandler(store, testcases, log)
 	authH       := handler.NewAuthHandler(users, cfg.JWTSigningKey, log)
 	problemH    := handler.NewProblemHandler(problemList, log)
 	contestH    := handler.NewContestHandler(contests, log)
@@ -136,7 +135,6 @@ func NewServer(
 		// Authenticated routes
 		authed := v1.Group("/", auth)
 		{
-			authed.GET("/contests/:contest_id/ranking/me", rankingH.GetUserRank)
 			authed.POST("/contests/:contest_id/register", contestH.RegisterParticipant)
 
 			// Contest submissions
@@ -149,9 +147,6 @@ func NewServer(
 		// Admin routes — require auth + admin role
 		admin := v1.Group("/admin", auth, adminOnly)
 		{
-			// 滚榜: call repeatedly during post-contest ceremony
-			admin.POST("/contests/:contest_id/unfreeze-next", adminH.UnfreezeNext)
-
 			// Test-case management
 			admin.POST("/problems/:id/testcases", adminH.UploadTestcases)
 

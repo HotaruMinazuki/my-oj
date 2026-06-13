@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -18,32 +17,57 @@ import (
 )
 
 // RankingService subscribes to judge results and maintains the live scoreboard
-// in Redis, publishing incremental deltas for WebSocket clients.
+// in Redis, publishing a full board snapshot to WebSocket clients on every change.
 //
-// It runs as a separate goroutine alongside the API server.  It uses its own
+// It runs as a separate goroutine alongside the API server, using its own
 // consumer group ("ranker") on QueueJudgeResults so it receives every result
-// independently of the API server's consumer group.
+// independently of the API server's DB-writer consumer group.
+//
+// All result processing happens on the single consumer goroutine, so no locking
+// is needed for the Redis read-modify-write of an entry — Redis is the only
+// shared state and each contest's entries are touched serially.
 type RankingService struct {
 	consumer mq.Consumer
 	rdb      *redis.Client
 	registry *contest.Registry
 	log      *zap.Logger
-	// contestCache caches contest metadata (settings, freeze time) to avoid
-	// hitting the DB on every submission.  Entries are short-lived (30 s TTL).
+
 	contestCache *contestMetaCache
+	problems     ContestProblemsLoader
+	users        UsernamesLoader
 }
 
-// ContestMetaLoader is called by the service to fetch a contest's metadata.
-// Typically wraps a DB query; inject a stub in tests.
+// ─── Loaders (injected; typically DB-backed) ──────────────────────────────────
+
+// ContestMetaLoader fetches a contest's scoring metadata.
 type ContestMetaLoader func(ctx context.Context, contestID models.ID) (*ContestMeta, error)
+
+// ContestProblemsLoader returns a contest's problems in display order (label "A",
+// "B", …) so the board can render columns and map problemID → label.
+type ContestProblemsLoader func(ctx context.Context, contestID models.ID) ([]ProblemLabel, error)
+
+// UsernamesLoader resolves a set of user IDs to display info in one round-trip.
+type UsernamesLoader func(ctx context.Context, userIDs []models.ID) (map[models.ID]UserInfo, error)
+
+// ProblemLabel pairs a problem with its scoreboard column label.
+type ProblemLabel struct {
+	ProblemID models.ID
+	Label     string
+}
+
+// UserInfo is the contestant display data shown on the board.
+type UserInfo struct {
+	Username     string
+	Organization string
+}
 
 // ContestMeta is the subset of Contest data the ranking service needs.
 type ContestMeta struct {
-	ContestType  models.ContestType
-	Settings     models.ContestSettings
-	StartTime    time.Time
-	FreezeTime   *time.Time
-	EndTime      time.Time
+	ContestType models.ContestType
+	Settings    models.ContestSettings
+	StartTime   time.Time
+	FreezeTime  *time.Time
+	EndTime     time.Time
 }
 
 // NewRankingService creates a RankingService.
@@ -52,6 +76,8 @@ func NewRankingService(
 	rdb *redis.Client,
 	registry *contest.Registry,
 	loader ContestMetaLoader,
+	problems ContestProblemsLoader,
+	users UsernamesLoader,
 	log *zap.Logger,
 ) *RankingService {
 	return &RankingService{
@@ -59,6 +85,8 @@ func NewRankingService(
 		rdb:      rdb,
 		registry: registry,
 		log:      log,
+		problems: problems,
+		users:    users,
 		contestCache: &contestMetaCache{
 			loader: loader,
 			ttl:    30 * time.Second,
@@ -67,7 +95,7 @@ func NewRankingService(
 	}
 }
 
-// Run starts the service loop.  Blocks until ctx is cancelled.
+// Run starts the service loop. Blocks until ctx is cancelled.
 func (rs *RankingService) Run(ctx context.Context) error {
 	rs.log.Info("ranking service starting")
 	return rs.consumer.Subscribe(ctx, mq.QueueJudgeResults,
@@ -93,50 +121,35 @@ func (rs *RankingService) handleResult(ctx context.Context, msg mq.Message) erro
 	return rs.processContestResult(ctx, result)
 }
 
-// processContestResult is the core ranking update logic for one contest submission.
+// processContestResult integrates one judged contest submission and rebuilds the board.
 func (rs *RankingService) processContestResult(ctx context.Context, result *mq.ResultMessage) error {
 	contestID := *result.ContestID
+	userID, problemID := result.UserID, result.ProblemID
 	log := rs.log.With(
 		zap.Int64("contest_id", contestID),
 		zap.Int64("submission_id", result.SubmissionID),
 	)
 
-	// ── Load contest metadata ─────────────────────────────────────────────────
 	meta, err := rs.contestCache.get(ctx, contestID)
 	if err != nil {
 		return fmt.Errorf("ranking: load contest %d: %w", contestID, err)
 	}
-
 	strategy, err := rs.registry.Get(meta.ContestType)
 	if err != nil {
 		log.Warn("unknown contest type; skipping ranking update", zap.String("type", string(meta.ContestType)))
 		return nil
 	}
 
-	// We need the problemID from the submission; it's not in ResultMessage directly.
-	// Pull it from the TestCaseResults (first entry) or from the task.
-	// Simpler: the API server should include ProblemID in ResultMessage.
-	// For now, derive it from the task_id embedded in the result.
-	// (In production, add ProblemID to ResultMessage — noted as a TODO.)
-	problemID, userID, err := rs.resolveIDs(ctx, contestID, result)
-	if err != nil {
-		return fmt.Errorf("ranking: resolve IDs for submission %d: %w", result.SubmissionID, err)
-	}
-
-	// ── Load current ScoreEntry from Redis ────────────────────────────────────
+	// ── Read-modify-write the (user, problem) entry ──────────────────────────
 	field := entryField(userID, problemID)
-	rawEntry, err := rs.rdb.HGet(ctx, redisKey(contestID, keyEntries), field).Bytes()
 	var prev *contest.ScoreEntry
-	if err == nil {
+	if raw, err := rs.rdb.HGet(ctx, redisKey(contestID, keyEntries), field).Bytes(); err == nil {
 		var e contest.ScoreEntry
-		if err := json.Unmarshal(rawEntry, &e); err == nil {
+		if json.Unmarshal(raw, &e) == nil {
 			prev = &e
 		}
 	}
 
-	oldStatus := entryStatus(toView(prev))
-
-	// ── Apply strategy ────────────────────────────────────────────────────────
 	event := contest.SubmissionEvent{
 		UserID:       userID,
 		ProblemID:    problemID,
@@ -148,343 +161,158 @@ func (rs *RankingService) processContestResult(ctx context.Context, result *mq.R
 	}
 	newEntry := strategy.Apply(event, prev, meta.Settings)
 
-	// ── Check first blood ─────────────────────────────────────────────────────
-	isFirstBlood := false
+	// ── First blood (only when newly accepted) ───────────────────────────────
 	if newEntry.Accepted && (prev == nil || !prev.Accepted) {
-		// Attempt to set first blood atomically.
-		fbKey := redisKey(contestID, keyFirstBlood)
-		set, err := rs.rdb.HSetNX(ctx, fbKey, fmt.Sprintf("%d", problemID), "1").Result()
+		set, err := rs.rdb.HSetNX(ctx, redisKey(contestID, keyFirstBlood),
+			fmt.Sprintf("%d", problemID), "1").Result()
 		if err == nil && set {
 			newEntry.IsFirstBlood = true
-			isFirstBlood = true
 		}
 	}
 
-	// ── Persist new ScoreEntry ────────────────────────────────────────────────
 	entryJSON, err := json.Marshal(newEntry)
 	if err != nil {
 		return fmt.Errorf("ranking: marshal entry: %w", err)
 	}
+	if err := rs.rdb.HSet(ctx, redisKey(contestID, keyEntries), field, entryJSON).Err(); err != nil {
+		return fmt.Errorf("ranking: persist entry: %w", err)
+	}
 
-	// ── Update UserAggregate ──────────────────────────────────────────────────
-	aggKey := redisKey(contestID, keyAggregates)
-	rawAgg, _ := rs.rdb.HGet(ctx, aggKey, fmt.Sprintf("%d", userID)).Bytes()
-	var agg UserAggregate
-	_ = json.Unmarshal(rawAgg, &agg)
-	agg.UserID = userID
-
-	// Recompute aggregate from scratch by reading all entries for this user.
-	// This is O(problems) per update — fine for up to ~30 problems per contest.
-	agg, err = rs.recomputeAggregate(ctx, contestID, userID, newEntry, prev, agg)
+	// ── Rebuild the full board and broadcast it ──────────────────────────────
+	snapshot, err := rs.rebuildSnapshot(ctx, contestID, meta, strategy)
 	if err != nil {
-		return fmt.Errorf("ranking: recompute aggregate: %w", err)
+		return fmt.Errorf("ranking: rebuild snapshot: %w", err)
 	}
-
-	aggJSON, _ := json.Marshal(agg)
-
-	// ── Get old rank before update ────────────────────────────────────────────
-	oldRank := rs.getUserRank(ctx, contestID, userID)
-
-	// ── Atomic Redis pipeline ─────────────────────────────────────────────────
-	pipe := rs.rdb.Pipeline()
-	pipe.HSet(ctx, redisKey(contestID, keyEntries), field, entryJSON)
-	pipe.HSet(ctx, aggKey, fmt.Sprintf("%d", userID), aggJSON)
-	pipe.ZAdd(ctx, redisKey(contestID, keyBoard), redis.Z{
-		Score:  boardScore(agg.Solved, agg.PenaltyMins),
-		Member: fmt.Sprintf("%d", userID),
-	})
-	if _, err := pipe.Exec(ctx); err != nil {
-		return fmt.Errorf("ranking: redis pipeline: %w", err)
+	if err := rs.publishSnapshot(ctx, contestID, snapshot); err != nil {
+		log.Warn("publish board snapshot failed", zap.Error(err))
 	}
-
-	// ── Get new rank after update ─────────────────────────────────────────────
-	newRank := rs.getUserRank(ctx, contestID, userID)
-
-	// ── Build and publish delta ───────────────────────────────────────────────
-	delta := &RankDelta{
-		Type:       EventSubmission,
-		ContestID:  contestID,
-		Timestamp:  time.Now().UTC(),
-		UserID:     userID,
-		ProblemID:  problemID,
-		OldStatus:  oldStatus,
-		NewStatus:  entryStatus(toView(newEntry)),
-		NewSolved:  agg.Solved,
-		NewPenalty: agg.PenaltyMins,
-		OldRank:    oldRank,
-		NewRank:    newRank,
-	}
-	if isFirstBlood {
-		delta.Type = EventFirstBlood
-	}
-
-	if err := rs.publishDelta(ctx, contestID, delta); err != nil {
-		log.Warn("failed to publish ranking delta", zap.Error(err))
-		// Non-fatal: the scoreboard will be eventually consistent on next refresh.
-	}
-
-	// ── Update full snapshot asynchronously ──────────────────────────────────
-	go func() {
-		if err := rs.rebuildSnapshot(context.Background(), contestID); err != nil {
-			log.Warn("snapshot rebuild failed", zap.Error(err))
-		}
-	}()
-
 	return nil
 }
 
-// UnfreezeNext reveals the earliest frozen submission for the lowest-ranked
-// team with pending results.  Called by the organizer's 滚榜 API endpoint.
-//
-// Returns the delta that was published, or nil if nothing was revealed.
-func (rs *RankingService) UnfreezeNext(ctx context.Context, contestID models.ID) (*RankDelta, error) {
-	meta, err := rs.contestCache.get(ctx, contestID)
-	if err != nil {
-		return nil, err
-	}
-	strategy, err := rs.registry.Get(meta.ContestType)
-	if err != nil {
-		return nil, err
-	}
-	icpcStrategy, ok := strategy.(*contest.ICPCStrategy)
-	if !ok {
-		return nil, fmt.Errorf("UnfreezeNext: only supported for ICPC contests")
-	}
-
-	// ── Collect all pending entries ───────────────────────────────────────────
-	allEntries, err := rs.rdb.HGetAll(ctx, redisKey(contestID, keyEntries)).Result()
-	if err != nil {
-		return nil, fmt.Errorf("UnfreezeNext: load entries: %w", err)
-	}
-
-	type pendingEntry struct {
-		userID    models.ID
-		problemID models.ID
-		entry     *contest.ScoreEntry
-		userRank  int
-	}
-
-	var pending []pendingEntry
-	for field, raw := range allEntries {
-		var e contest.ScoreEntry
-		if err := json.Unmarshal([]byte(raw), &e); err != nil {
-			continue
-		}
-		if !e.IsPending || len(e.FrozenResults) == 0 {
-			continue
-		}
-		uid, pid := parseEntryField(field)
-		rank := rs.getUserRank(ctx, contestID, uid)
-		pending = append(pending, pendingEntry{uid, pid, &e, rank})
-	}
-
-	if len(pending) == 0 {
-		return nil, nil // nothing left to reveal
-	}
-
-	// ── 滚榜 order: reveal lowest-ranked team first ───────────────────────────
-	sort.Slice(pending, func(i, j int) bool {
-		return pending[i].userRank > pending[j].userRank // higher rank number = worse rank
-	})
-	target := pending[0]
-
-	// ── Reveal the earliest frozen result ────────────────────────────────────
-	// Use the current time as the frozen submission time (approximation).
-	// In production, store the actual submission timestamp with the frozen result.
-	frozenTime := time.Now().UTC()
-	updated, accepted := icpcStrategy.RevealNext(target.entry, meta.StartTime, frozenTime, meta.Settings)
-
-	// ── Persist ───────────────────────────────────────────────────────────────
-	oldStatus := entryStatus(toView(target.entry))
-	entryJSON, _ := json.Marshal(updated)
-	field := entryField(target.userID, target.problemID)
-	if err := rs.rdb.HSet(ctx, redisKey(contestID, keyEntries), field, entryJSON).Err(); err != nil {
-		return nil, fmt.Errorf("UnfreezeNext: persist entry: %w", err)
-	}
-
-	if accepted {
-		agg, _ := rs.recomputeAggregate(ctx, contestID, target.userID, updated, target.entry, UserAggregate{})
-		aggJSON, _ := json.Marshal(agg)
-		rs.rdb.HSet(ctx, redisKey(contestID, keyAggregates), fmt.Sprintf("%d", target.userID), aggJSON)
-		rs.rdb.ZAdd(ctx, redisKey(contestID, keyBoard), redis.Z{
-			Score:  boardScore(agg.Solved, agg.PenaltyMins),
-			Member: fmt.Sprintf("%d", target.userID),
-		})
-	}
-
-	newRank := rs.getUserRank(ctx, contestID, target.userID)
-	delta := &RankDelta{
-		Type:      EventUnfreeze,
-		ContestID: contestID,
-		Timestamp: time.Now().UTC(),
-		UserID:    target.userID,
-		ProblemID: target.problemID,
-		OldStatus: oldStatus,
-		NewStatus: entryStatus(toView(updated)),
-		OldRank:   target.userRank,
-		NewRank:   newRank,
-	}
-
-	_ = rs.publishDelta(ctx, contestID, delta)
-	go rs.rebuildSnapshot(context.Background(), contestID) //nolint:errcheck
-	return delta, nil
-}
-
-// ─── Redis helpers ────────────────────────────────────────────────────────────
-
-// getUserRank returns 1-based rank from the Redis sorted set.
-// Returns 0 if the user is not on the board.
-func (rs *RankingService) getUserRank(ctx context.Context, contestID, userID models.ID) int {
-	// ZREVRANK: 0-indexed rank in descending order (highest score = rank 0).
-	rank, err := rs.rdb.ZRevRank(ctx, redisKey(contestID, keyBoard),
-		fmt.Sprintf("%d", userID)).Result()
-	if err != nil {
-		return 0
-	}
-	return int(rank) + 1
-}
-
-// recomputeAggregate rebuilds a user's aggregate stats by scanning all their
-// problem entries.  Updates are small (≤30 problems) so this is fast.
-func (rs *RankingService) recomputeAggregate(
+// rebuildSnapshot recomputes the full board from the entry hash, stores it at
+// keySnapshot, and returns it. Frozen ICPC results are auto-revealed once the
+// contest has ended (no manual 滚榜 ceremony).
+func (rs *RankingService) rebuildSnapshot(
 	ctx context.Context,
-	contestID, userID models.ID,
-	latestEntry *contest.ScoreEntry,
-	_ *contest.ScoreEntry,
-	_ UserAggregate,
-) (UserAggregate, error) {
-	all, err := rs.rdb.HGetAll(ctx, redisKey(contestID, keyEntries)).Result()
+	contestID models.ID,
+	meta *ContestMeta,
+	strategy contest.Strategy,
+) (*BoardSnapshot, error) {
+	rawEntries, err := rs.rdb.HGetAll(ctx, redisKey(contestID, keyEntries)).Result()
 	if err != nil {
-		return UserAggregate{}, err
+		return nil, fmt.Errorf("load entries: %w", err)
 	}
 
-	agg := UserAggregate{UserID: userID}
-	prefix := fmt.Sprintf("%d:", userID)
-	for field, raw := range all {
-		if !strings.HasPrefix(field, prefix) {
-			continue
-		}
+	now := time.Now().UTC()
+	ended := !meta.EndTime.IsZero() && !now.Before(meta.EndTime)
+	frozen := meta.FreezeTime != nil && !now.Before(*meta.FreezeTime) && !ended
+
+	var entries []*contest.ScoreEntry
+	for _, raw := range rawEntries {
 		var e contest.ScoreEntry
-		if err := json.Unmarshal([]byte(raw), &e); err != nil {
+		if json.Unmarshal([]byte(raw), &e) != nil {
 			continue
 		}
-		if e.UserID != userID {
-			continue
-		}
-		// Overlay the latest entry (not yet persisted when this runs).
-		if e.ProblemID == latestEntry.ProblemID {
-			e = *latestEntry
-		}
-		if e.Accepted {
-			agg.Solved++
-			agg.PenaltyMins += e.Penalty
-			if e.BestSubmitTime.After(agg.LastACTime) {
-				agg.LastACTime = e.BestSubmitTime
+		// Auto-reveal frozen ICPC submissions once the contest is over.
+		if ended {
+			if icpc, ok := strategy.(*contest.ICPCStrategy); ok {
+				for len(e.FrozenResults) > 0 {
+					revealed, _ := icpc.RevealNext(&e, meta.StartTime, meta.EndTime, meta.Settings)
+					e = *revealed
+				}
 			}
 		}
-	}
-	return agg, nil
-}
-
-// publishDelta serialises a RankDelta and publishes it to the contest's
-// Redis Pub/Sub channel.  The Hub picks this up and forwards to WebSocket clients.
-func (rs *RankingService) publishDelta(ctx context.Context, contestID models.ID, d *RankDelta) error {
-	payload, err := json.Marshal(d)
-	if err != nil {
-		return err
-	}
-	return rs.rdb.Publish(ctx, redisKey(contestID, keyEvents), payload).Err()
-}
-
-// rebuildSnapshot recomputes the full RankSnapshot and stores it in Redis.
-// Called asynchronously after each scoreboard update.
-func (rs *RankingService) rebuildSnapshot(ctx context.Context, contestID models.ID) error {
-	allEntries, err := rs.rdb.HGetAll(ctx, redisKey(contestID, keyEntries)).Result()
-	if err != nil {
-		return err
-	}
-
-	// Parse all entries.
-	var entries []*contest.ScoreEntry
-	for _, raw := range allEntries {
-		var e contest.ScoreEntry
-		if json.Unmarshal([]byte(raw), &e) == nil {
-			entries = append(entries, &e)
-		}
-	}
-
-	// Load strategy and rank.
-	meta, err := rs.contestCache.get(ctx, contestID)
-	if err != nil {
-		return err
-	}
-	strategy, err := rs.registry.Get(meta.ContestType)
-	if err != nil {
-		return err
+		ec := e
+		entries = append(entries, &ec)
 	}
 
 	rows := strategy.Rank(entries, meta.Settings)
 
-	// Convert to view (strip frozen internals).
-	viewRows := make([]RankRowView, len(rows))
-	for i, r := range rows {
-		vr := RankRowView{
+	// Resolve labels + usernames.
+	labels, err := rs.problems(ctx, contestID)
+	if err != nil {
+		return nil, fmt.Errorf("load contest problems: %w", err)
+	}
+	labelByPID := make(map[models.ID]string, len(labels))
+	orderedLabels := make([]string, 0, len(labels))
+	for _, pl := range labels {
+		labelByPID[pl.ProblemID] = pl.Label
+		orderedLabels = append(orderedLabels, pl.Label)
+	}
+
+	userIDs := make([]models.ID, 0, len(rows))
+	for _, r := range rows {
+		userIDs = append(userIDs, r.UserID)
+	}
+	userInfo, err := rs.users(ctx, userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load usernames: %w", err)
+	}
+
+	contestants := make([]BoardRow, 0, len(rows))
+	for _, r := range rows {
+		cells := make(map[string]BoardCell, len(r.Entries))
+		solved := 0
+		for pid, e := range r.Entries {
+			label, ok := labelByPID[pid]
+			if !ok {
+				continue // problem removed from contest
+			}
+			if e.Accepted {
+				solved++
+			}
+			cells[label] = BoardCell{
+				Solved:     e.Accepted,
+				Attempts:   e.AttemptCount,
+				Pending:    e.FrozenAttempts,
+				Penalty:    e.Penalty,
+				Score:      e.DisplayScore,
+				FirstBlood: e.IsFirstBlood,
+			}
+		}
+		info := userInfo[r.UserID]
+		contestants = append(contestants, BoardRow{
 			Rank:         r.Rank,
 			UserID:       r.UserID,
-			TotalScore:   r.TotalScore,
+			Username:     info.Username,
+			Organization: info.Organization,
+			Problems:     cells,
+			TotalSolved:  solved,
 			TotalPenalty: r.TotalPenalty,
-			Entries:      make(map[models.ID]*ScoreEntryView, len(r.Entries)),
-		}
-		for pid, e := range r.Entries {
-			vr.Entries[pid] = toView(e)
-		}
-		viewRows[i] = vr
+			TotalScore:   r.TotalScore,
+		})
+	}
+	// rows are already ranked; keep that order stable.
+	sort.SliceStable(contestants, func(i, j int) bool {
+		return contestants[i].Rank < contestants[j].Rank
+	})
+
+	snapshot := &BoardSnapshot{
+		ContestID:   contestID,
+		Frozen:      frozen,
+		Problems:    orderedLabels,
+		Contestants: contestants,
+		UpdatedAt:   now,
 	}
 
-	snapshot := RankSnapshot{
-		ContestID: contestID,
-		Rows:      viewRows,
-		UpdatedAt: time.Now().UTC(),
-	}
 	payload, _ := json.Marshal(snapshot)
-	return rs.rdb.Set(ctx, redisKey(contestID, keySnapshot), payload, 0).Err()
+	if err := rs.rdb.Set(ctx, redisKey(contestID, keySnapshot), payload, 0).Err(); err != nil {
+		return nil, fmt.Errorf("store snapshot: %w", err)
+	}
+	return snapshot, nil
 }
 
-// resolveIDs extracts UserID and ProblemID from the result message.
-// Both fields are denormalised into ResultMessage by the judger/API server.
-func (rs *RankingService) resolveIDs(_ context.Context, _ models.ID, result *mq.ResultMessage) (problemID, userID models.ID, err error) {
-	if result.UserID == 0 || result.ProblemID == 0 {
-		return 0, 0, fmt.Errorf("ranking: missing user_id/problem_id in result for submission %d", result.SubmissionID)
+// publishSnapshot pushes the full board as a typed WS frame to the contest's
+// Pub/Sub channel. The Hub forwards it verbatim to connected clients.
+func (rs *RankingService) publishSnapshot(ctx context.Context, contestID models.ID, snap *BoardSnapshot) error {
+	frame, err := json.Marshal(map[string]any{
+		"type": EventSnapshot,
+		"data": snap,
+	})
+	if err != nil {
+		return err
 	}
-	return result.ProblemID, result.UserID, nil
-}
-
-// toView strips internal freeze fields from a ScoreEntry for public consumption.
-func toView(e *contest.ScoreEntry) *ScoreEntryView {
-	if e == nil {
-		return nil
-	}
-	return &ScoreEntryView{
-		Accepted:          e.Accepted,
-		DisplayScore:      e.DisplayScore,
-		Penalty:           e.Penalty,
-		AttemptCount:      e.AttemptCount,
-		WrongAttemptCount: e.WrongAttemptCount,
-		BestSubmitTime:    e.BestSubmitTime,
-		IsPending:         e.IsPending,
-		FrozenAttempts:    e.FrozenAttempts,
-		IsFirstBlood:      e.IsFirstBlood,
-	}
-}
-
-func parseEntryField(field string) (userID, problemID models.ID) {
-	parts := strings.SplitN(field, ":", 2)
-	if len(parts) != 2 {
-		return 0, 0
-	}
-	u, _ := strconv.ParseInt(parts[0], 10, 64)
-	p, _ := strconv.ParseInt(parts[1], 10, 64)
-	return models.ID(u), models.ID(p)
+	return rs.rdb.Publish(ctx, redisKey(contestID, keyEvents), frame).Err()
 }
 
 // ─── Contest metadata cache ───────────────────────────────────────────────────
@@ -495,19 +323,27 @@ type cachedMeta struct {
 }
 
 type contestMetaCache struct {
+	mu     sync.Mutex
 	loader ContestMetaLoader
 	ttl    time.Duration
 	data   map[models.ID]*cachedMeta
 }
 
 func (c *contestMetaCache) get(ctx context.Context, id models.ID) (*ContestMeta, error) {
+	c.mu.Lock()
 	if cm, ok := c.data[id]; ok && time.Now().Before(cm.expiresAt) {
+		c.mu.Unlock()
 		return cm.meta, nil
 	}
+	c.mu.Unlock()
+
 	meta, err := c.loader(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+
+	c.mu.Lock()
 	c.data[id] = &cachedMeta{meta: meta, expiresAt: time.Now().Add(c.ttl)}
+	c.mu.Unlock()
 	return meta, nil
 }

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -9,27 +8,31 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
-	"github.com/your-org/my-oj/internal/core/ranking"
 	"github.com/your-org/my-oj/internal/models"
 )
 
+// rankingHub is the subset of *ranking.Hub the handler needs.
+type rankingHub interface {
+	ServeWS(w http.ResponseWriter, r *http.Request, contestID models.ID)
+}
+
 // RankingHandler serves the live scoreboard over WebSocket and as a REST snapshot.
 type RankingHandler struct {
-	hub *ranking.Hub
+	hub rankingHub
 	rdb *redis.Client
 	log *zap.Logger
 }
 
-func NewRankingHandler(hub *ranking.Hub, rdb *redis.Client, log *zap.Logger) *RankingHandler {
+func NewRankingHandler(hub rankingHub, rdb *redis.Client, log *zap.Logger) *RankingHandler {
 	return &RankingHandler{hub: hub, rdb: rdb, log: log}
 }
 
-// ServeWS upgrades the connection to WebSocket and streams incremental rank deltas.
+// ServeWS upgrades the connection to WebSocket and streams board snapshots.
 //
 //	GET /ws/ranking/:contest_id
 //
-// The client receives an initial {"type":"snapshot","data":{…}} frame followed by
-// {"type":"submission"|"firstblood"|"unfreeze","data":{…RankDelta…}} frames.
+// The client receives a {"type":"snapshot","data":{…BoardSnapshot…}} frame on
+// connect and again after every scoreboard change.
 func (h *RankingHandler) ServeWS(c *gin.Context) {
 	contestID, ok := parseContestID(c)
 	if !ok {
@@ -63,47 +66,6 @@ func (h *RankingHandler) GetSnapshot(c *gin.Context) {
 
 	// raw is already valid JSON — forward without re-marshalling.
 	c.Data(http.StatusOK, "application/json; charset=utf-8", raw)
-}
-
-// GetUserRank returns the authenticated user's current rank within a contest.
-//
-//	GET /api/v1/contests/:contest_id/ranking/me
-func (h *RankingHandler) GetUserRank(c *gin.Context) {
-	contestID, ok := parseContestID(c)
-	if !ok {
-		return
-	}
-
-	raw, err := h.rdb.Get(c.Request.Context(), rankingSnapshotKey(contestID)).Bytes()
-	if err == redis.Nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "ranking not yet available"})
-		return
-	}
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-		return
-	}
-
-	userIDVal, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
-		return
-	}
-	userID, _ := userIDVal.(models.ID)
-
-	var snapshot ranking.RankSnapshot
-	if err := json.Unmarshal(raw, &snapshot); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "snapshot parse error"})
-		return
-	}
-
-	for _, row := range snapshot.Rows {
-		if row.UserID == userID {
-			c.JSON(http.StatusOK, row)
-			return
-		}
-	}
-	c.JSON(http.StatusNotFound, gin.H{"error": "user not on board"})
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

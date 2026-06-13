@@ -14,7 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/your-org/my-oj/internal/core/ranking"
 	"github.com/your-org/my-oj/internal/models"
 	"github.com/your-org/my-oj/internal/storage"
 )
@@ -37,45 +36,17 @@ type TestcaseAdminRepo interface {
 
 // AdminHandler exposes privileged contest- and problem-management endpoints.
 type AdminHandler struct {
-	rankingService *ranking.RankingService
-	store          storage.ObjectStore
-	testcases      TestcaseAdminRepo
-	log            *zap.Logger
+	store     storage.ObjectStore
+	testcases TestcaseAdminRepo
+	log       *zap.Logger
 }
 
 func NewAdminHandler(
-	rankingService *ranking.RankingService,
 	store storage.ObjectStore,
 	testcases TestcaseAdminRepo,
 	log *zap.Logger,
 ) *AdminHandler {
-	return &AdminHandler{rankingService: rankingService, store: store, testcases: testcases, log: log}
-}
-
-// ─── POST /api/v1/admin/contests/:contest_id/unfreeze-next ───────────────────
-
-// UnfreezeNext reveals one frozen submission for the lowest-ranked team.
-// Call repeatedly during the post-contest 滚榜 ceremony.
-//
-// 200 → delta published (contains OldRank/NewRank for frontend animation).
-// 204 → nothing left to reveal.
-func (h *AdminHandler) UnfreezeNext(c *gin.Context) {
-	contestID, ok := parseContestID(c)
-	if !ok {
-		return
-	}
-
-	delta, err := h.rankingService.UnfreezeNext(c.Request.Context(), contestID)
-	if err != nil {
-		h.log.Error("UnfreezeNext failed", zap.Error(err), zap.Int64("contest_id", contestID))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if delta == nil {
-		c.Status(http.StatusNoContent)
-		return
-	}
-	c.JSON(http.StatusOK, delta)
+	return &AdminHandler{store: store, testcases: testcases, log: log}
 }
 
 // ─── POST /api/v1/admin/problems/:id/testcases ───────────────────────────────
