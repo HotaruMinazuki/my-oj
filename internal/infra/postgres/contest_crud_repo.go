@@ -302,6 +302,29 @@ ORDER BY u.id`
 	return out, rows.Err()
 }
 
+// Delete removes a contest. Its submissions are detached (contest_id → NULL,
+// becoming practice submissions) since they lack ON DELETE CASCADE; the
+// contest_problems and contest_participants rows cascade away automatically.
+func (r *ContestRepo) Delete(ctx context.Context, id models.ID) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.ExecContext(ctx, `UPDATE submissions SET contest_id = NULL WHERE contest_id = $1`, id); err != nil {
+		return fmt.Errorf("detach submissions from contest %d: %w", id, err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM contests WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete contest %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("contest %d not found", id)
+	}
+	return tx.Commit()
+}
+
 // ─── Register ─────────────────────────────────────────────────────────────────
 
 func (r *ContestRepo) Register(ctx context.Context, contestID, userID models.ID) error {

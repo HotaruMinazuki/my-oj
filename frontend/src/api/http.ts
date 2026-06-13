@@ -69,13 +69,33 @@ export const problemApi = {
   create: (data: Partial<Problem>) =>
     http.post<Problem>('/admin/problems', data).then(r => r.data),
 
+  update: (id: number, data: Partial<Problem>) =>
+    http.put(`/admin/problems/${id}`, data).then(r => r.data),
+
+  remove: (id: number) =>
+    http.delete(`/admin/problems/${id}`).then(r => r.data),
+
+  // List the test cases currently registered for a problem (admin view).
+  getTestcases: (id: number) =>
+    http.get<{ test_cases: TestCaseInfo[]; count: number }>(`/admin/problems/${id}/testcases`).then(r => r.data),
+
   uploadTestcases: (id: number, file: File) => {
     const fd = new FormData()
     fd.append('file', file)
-    return http.post(`/admin/problems/${id}/testcases`, fd, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    }).then(r => r.data)
+    return http.post<{ test_cases: number; files: string[]; warnings: string[] }>(
+      `/admin/problems/${id}/testcases`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      }).then(r => r.data)
   },
+}
+
+export interface TestCaseInfo {
+  test_case_id: number
+  group_id: number
+  ordinal: number
+  input_path: string
+  output_path?: string
+  score: number
 }
 
 // ─── Contest API ──────────────────────────────────────────────────────────────
@@ -110,6 +130,9 @@ export const contestApi = {
 
   removeProblem: (contestId: number, problemId: number) =>
     http.delete(`/admin/contests/${contestId}/problems/${problemId}`).then(r => r.data),
+
+  remove: (id: number) =>
+    http.delete(`/admin/contests/${id}`).then(r => r.data),
 }
 
 // ─── Submission API ───────────────────────────────────────────────────────────

@@ -29,6 +29,7 @@ type ContestCRUDRepo interface {
 	// it to the contest in one transaction. p.ID is back-filled on success.
 	CreateContestProblem(ctx context.Context, contestID models.ID, p *models.Problem, label string, maxScore, ordinal int) error
 	RemoveProblem(ctx context.Context, contestID, problemID models.ID) error
+	Delete(ctx context.Context, id models.ID) error
 }
 
 // ContestHandler serves contest list, detail, registration, and admin endpoints.
@@ -375,6 +376,23 @@ func (h *ContestHandler) RemoveProblem(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "problem removed"})
+}
+
+// ─── Delete (Admin)  DELETE /api/v1/admin/contests/:contest_id ────────────────
+
+// Delete removes a contest. Its submissions are kept (detached to practice);
+// contest_problems and contest_participants cascade away.
+func (h *ContestHandler) Delete(c *gin.Context) {
+	id, ok := parseContestID(c)
+	if !ok {
+		return
+	}
+	if err := h.contests.Delete(c.Request.Context(), id); err != nil {
+		h.log.Error("delete contest", zap.Error(err), zap.Int64("contest_id", id))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "contest deleted", "id": id})
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

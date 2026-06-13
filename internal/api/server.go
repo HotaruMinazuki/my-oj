@@ -156,10 +156,14 @@ func NewServer(
 		{
 			// Test-case management
 			admin.POST("/problems/:id/testcases", adminH.UploadTestcases)
+			admin.GET("/problems/:id/testcases", problemH.ListTestcases)
 
 			// Problem & contest management
 			admin.POST("/problems", problemH.Create)
+			admin.PUT("/problems/:id", problemH.Update)
+			admin.DELETE("/problems/:id", problemH.Delete)
 			admin.POST("/contests", contestH.Create)
+			admin.DELETE("/contests/:contest_id", contestH.Delete)
 
 			// Contest ↔ problem linking
 			admin.POST("/contests/:contest_id/problems", contestH.AddProblem)

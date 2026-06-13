@@ -19,6 +19,9 @@ type ProblemListRepo interface {
 	ListProblems(ctx context.Context, onlyPublic bool, limit, offset int) ([]models.Problem, int, error)
 	GetProblemByID(ctx context.Context, id models.ID) (*models.Problem, error)
 	CreateProblem(ctx context.Context, p *models.Problem) error
+	UpdateProblem(ctx context.Context, p *models.Problem) error
+	DeleteProblem(ctx context.Context, id models.ID) error
+	GetTestCases(ctx context.Context, problemID models.ID) ([]models.JudgeTestCase, error)
 	// CanNonAdminView reports whether a non-admin may view a private (contest)
 	// problem now — true once its contest has ended, or while running for participants.
 	CanNonAdminView(ctx context.Context, problemID, userID models.ID, authed bool) (bool, error)
@@ -152,4 +155,83 @@ func (h *ProblemHandler) Create(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, p)
+}
+
+// ─── Update (Admin)  PUT /api/v1/admin/problems/:id ───────────────────────────
+
+func (h *ProblemHandler) Update(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid problem id"})
+		return
+	}
+	var req createProblemReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	p := &models.Problem{
+		ID:          models.ID(id),
+		Title:       req.Title,
+		Statement:   req.Statement,
+		TimeLimitMs: req.TimeLimitMs,
+		MemLimitKB:  req.MemLimitKB,
+		JudgeType:   req.JudgeType,
+		IsPublic:    req.IsPublic,
+	}
+	if p.TimeLimitMs == 0 {
+		p.TimeLimitMs = 2000
+	}
+	if p.MemLimitKB == 0 {
+		p.MemLimitKB = 262144
+	}
+	if p.JudgeType == "" {
+		p.JudgeType = models.JudgeStandard
+	}
+
+	if err := h.problems.UpdateProblem(c.Request.Context(), p); err != nil {
+		h.log.Error("update problem", zap.Error(err), zap.Int64("problem_id", id))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "problem updated", "id": id})
+}
+
+// ─── Delete (Admin)  DELETE /api/v1/admin/problems/:id ────────────────────────
+
+// Delete removes a problem along with its test cases, contest links, and ALL
+// of its submissions (the latter have no cascade, so they are deleted explicitly).
+func (h *ProblemHandler) Delete(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid problem id"})
+		return
+	}
+	if err := h.problems.DeleteProblem(c.Request.Context(), models.ID(id)); err != nil {
+		h.log.Error("delete problem", zap.Error(err), zap.Int64("problem_id", id))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "problem deleted", "id": id})
+}
+
+// ─── ListTestcases (Admin)  GET /api/v1/admin/problems/:id/testcases ──────────
+
+// ListTestcases returns the test cases currently registered for a problem, so
+// the admin UI can show what data is in place before re-uploading (which
+// overwrites it entirely).
+func (h *ProblemHandler) ListTestcases(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid problem id"})
+		return
+	}
+	cases, err := h.problems.GetTestCases(c.Request.Context(), models.ID(id))
+	if err != nil {
+		h.log.Error("list testcases", zap.Error(err), zap.Int64("problem_id", id))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"test_cases": cases, "count": len(cases)})
 }

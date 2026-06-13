@@ -137,6 +137,55 @@ SELECT EXISTS (
 	return ok, nil
 }
 
+// UpdateProblem updates the editable fields of a problem (title, statement,
+// limits, judge type, visibility). The testcase data is managed separately via
+// the testcase-upload endpoint.
+func (r *ProblemRepo) UpdateProblem(ctx context.Context, p *models.Problem) error {
+	const q = `
+UPDATE problems SET
+  title         = $2,
+  statement     = $3,
+  time_limit_ms = $4,
+  mem_limit_kb  = $5,
+  judge_type    = $6,
+  is_public     = $7,
+  updated_at    = NOW()
+WHERE id = $1`
+	res, err := r.db.ExecContext(ctx, q,
+		p.ID, p.Title, p.Statement, p.TimeLimitMs, p.MemLimitKB, string(p.JudgeType), p.IsPublic,
+	)
+	if err != nil {
+		return fmt.Errorf("update problem %d: %w", p.ID, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("problem %d not found", p.ID)
+	}
+	return nil
+}
+
+// DeleteProblem removes a problem and everything that depends on it. Its
+// submissions are deleted first (they have no ON DELETE CASCADE), then the row
+// itself — test_cases and contest_problems cascade away automatically.
+func (r *ProblemRepo) DeleteProblem(ctx context.Context, id models.ID) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM submissions WHERE problem_id = $1`, id); err != nil {
+		return fmt.Errorf("delete submissions for problem %d: %w", id, err)
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM problems WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete problem %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("problem %d not found", id)
+	}
+	return tx.Commit()
+}
+
 // CreateProblem inserts a new problem and back-fills ID, CreatedAt, UpdatedAt.
 func (r *ProblemRepo) CreateProblem(ctx context.Context, p *models.Problem) error {
 	// NOTE: pass JSONB payloads as string (not []byte). lib/pq encodes []byte as

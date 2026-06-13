@@ -20,7 +20,7 @@
         <el-table-column label="开始时间" width="170">
           <template #default="{ row }">{{ fmt(row.start_time) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="300" align="center">
+        <el-table-column label="操作" width="380" align="center">
           <template #default="{ row }">
             <el-button size="small" type="primary" plain @click="openProblems(row)">
               管理题目
@@ -39,6 +39,9 @@
               @click="reveal(row)"
             >
               解榜
+            </el-button>
+            <el-button size="small" type="danger" plain @click="handleDeleteContest(row)">
+              删除
             </el-button>
           </template>
         </el-table-column>
@@ -118,17 +121,18 @@
         <el-table-column label="#"      prop="problem_id" width="56" align="center" />
         <el-table-column label="题目"   prop="title" min-width="180" />
         <el-table-column label="分值"   prop="max_score" width="70" align="center" />
-        <el-table-column label="操作"   width="170" align="center">
+        <el-table-column label="操作"   width="210" align="center">
           <template #default="{ row }">
-            <el-button size="small" plain @click="openUpload(row)">上传数据</el-button>
+            <el-button size="small" plain @click="openEditProblem(row)">编辑</el-button>
+            <el-button size="small" plain @click="openUpload(row)">数据</el-button>
             <el-button
               size="small"
               type="danger"
               link
               :icon="Delete"
-              @click="handleRemoveProblem(row)"
+              @click="handleDeleteProblem(row)"
             >
-              移除
+              删除
             </el-button>
           </template>
         </el-table-column>
@@ -184,15 +188,65 @@
       </template>
     </el-dialog>
 
-    <!-- 上传测试数据对话框 -->
+    <!-- 编辑题目对话框 -->
     <el-dialog
-      v-model="uploadVisible"
-      :title="`上传测试数据 — ${uploadTarget?.label}: ${uploadTarget?.title ?? ''}`"
-      width="480px"
+      v-model="editVisible"
+      :title="`编辑题目 — ${editProb.label}: #${editProb.id}`"
+      width="640px"
       append-to-body
     >
-      <el-alert type="info" :closable="false" show-icon style="margin-bottom:16px">
-        压缩包格式：直接包含 1.in, 1.out, 2.in, 2.out … 的 .zip 文件
+      <el-form :model="editProb" label-width="92px" v-loading="editLoading">
+        <el-form-item label="题目名称">
+          <el-input v-model="editProb.title" />
+        </el-form-item>
+        <el-form-item label="题面">
+          <el-input v-model="editProb.statement" type="textarea" :rows="6" placeholder="支持 Markdown" />
+        </el-form-item>
+        <el-form-item label="评测类型">
+          <el-select v-model="editProb.judge_type" style="width:170px">
+            <el-option label="标准（diff）" value="standard" />
+            <el-option label="Special Judge" value="special" />
+            <el-option label="交互题" value="interactive" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="时限 / 内存">
+          <el-input-number v-model="editProb.time_limit_ms" :min="100" :max="30000" :step="500" />
+          <span class="unit">ms</span>
+          <el-input-number v-model="editProb.mem_limit_kb" :min="16384" :max="1048576" :step="65536" style="margin-left:14px" />
+          <span class="unit">KB</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingEdit" @click="saveEditProblem">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 测试数据对话框 -->
+    <el-dialog
+      v-model="uploadVisible"
+      :title="`测试数据 — ${uploadTarget?.label}: ${uploadTarget?.title ?? ''}`"
+      width="520px"
+      append-to-body
+    >
+      <div class="section-sub">当前测试数据（{{ currentCases.length }} 个测试点）</div>
+      <el-table
+        v-if="currentCases.length"
+        :data="currentCases"
+        size="small"
+        border
+        max-height="200"
+        style="margin-bottom:16px"
+      >
+        <el-table-column label="#" prop="ordinal" width="60" align="center" />
+        <el-table-column label="输入" prop="input_path" min-width="100" />
+        <el-table-column label="输出" prop="output_path" min-width="100" />
+        <el-table-column label="分值" prop="score" width="70" align="center" />
+      </el-table>
+      <el-empty v-else :image-size="60" description="暂无测试数据" style="padding:8px 0" />
+
+      <el-alert type="warning" :closable="false" show-icon style="margin-bottom:16px">
+        重新上传将<strong>覆盖</strong>现有全部测试数据。压缩包直接包含 1.in, 1.out, 2.in, 2.out … 的 .zip。
       </el-alert>
       <el-upload
         drag
@@ -206,8 +260,8 @@
         <div class="el-upload__text">拖拽 .zip 文件到此，或 <em>点击选择</em></div>
       </el-upload>
       <template #footer>
-        <el-button @click="uploadVisible = false">取消</el-button>
-        <el-button type="primary" :loading="uploading" @click="doUpload">上传</el-button>
+        <el-button @click="uploadVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="uploading" @click="doUpload">上传并覆盖</el-button>
       </template>
     </el-dialog>
   </div>
@@ -220,6 +274,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, UploadFile } from 'element-plus'
 import dayjs from 'dayjs'
 import { contestApi, problemApi, adminApi } from '@/api/http'
+import type { TestCaseInfo } from '@/api/http'
 import type { Contest, ContestProblemSummary } from '@/types'
 
 // ─── Main list ─────────────────────────────────────────────────────────────
@@ -271,6 +326,22 @@ async function reveal(row: Contest) {
   } finally {
     revealingId.value = null
   }
+}
+
+// ─── Delete contest ────────────────────────────────────────────────────────
+async function handleDeleteContest(row: Contest) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除比赛「${row.title}」？比赛题目、报名记录、排行榜将一并移除；选手在本场的提交会转为练习提交保留。`,
+      '确认删除比赛',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+  } catch { return }
+  try {
+    await contestApi.remove(row.id)
+    ElMessage.success('比赛已删除')
+    fetch()
+  } catch { /* interceptor toasts */ }
 }
 
 // ─── Create contest dialog ────────────────────────────────────────────────
@@ -379,16 +450,64 @@ async function handleCreateProblem() {
   } finally { creatingProb.value = false }
 }
 
-// ─── Testcase upload (per contest problem) ─────────────────────────────────
+// ─── Edit an in-contest problem ────────────────────────────────────────────
+const editVisible = ref(false)
+const editLoading = ref(false)
+const savingEdit  = ref(false)
+const editProb = reactive({
+  id: 0, label: '', title: '', statement: '',
+  judge_type: 'standard', time_limit_ms: 2000, mem_limit_kb: 262144,
+})
+
+async function openEditProblem(row: ContestProblemSummary) {
+  editProb.id = row.problem_id
+  editProb.label = row.label
+  editVisible.value = true
+  editLoading.value = true
+  try {
+    const p = await problemApi.get(row.problem_id)
+    editProb.title         = p.title
+    editProb.statement     = p.statement ?? ''
+    editProb.judge_type    = p.judge_type
+    editProb.time_limit_ms = p.time_limit_ms
+    editProb.mem_limit_kb  = p.mem_limit_kb
+  } finally { editLoading.value = false }
+}
+
+async function saveEditProblem() {
+  if (!editProb.title) { ElMessage.warning('请填写题目名称'); return }
+  savingEdit.value = true
+  try {
+    await problemApi.update(editProb.id, {
+      title:         editProb.title,
+      statement:     editProb.statement,
+      judge_type:    editProb.judge_type as any,
+      time_limit_ms: editProb.time_limit_ms,
+      mem_limit_kb:  editProb.mem_limit_kb,
+      is_public:     false, // contest problems stay private until the contest ends
+    })
+    editVisible.value = false
+    ElMessage.success('已保存')
+    await refreshLinked()
+  } finally { savingEdit.value = false }
+}
+
+// ─── Testcase data (view current + overwrite upload) ───────────────────────
 const uploadVisible = ref(false)
 const uploadTarget  = ref<ContestProblemSummary | null>(null)
 const uploadFile    = ref<File | null>(null)
 const uploading     = ref(false)
+const currentCases  = ref<TestCaseInfo[]>([])
 
-function openUpload(row: ContestProblemSummary) {
+async function openUpload(row: ContestProblemSummary) {
   uploadTarget.value = row
   uploadFile.value   = null
+  currentCases.value = []
   uploadVisible.value = true
+  try {
+    const data = await problemApi.getTestcases(row.problem_id)
+    currentCases.value = data.test_cases ?? []
+  } catch { /* ignore */ }
 }
 
 function onUploadChange(file: UploadFile) {
@@ -402,7 +521,9 @@ async function doUpload() {
   try {
     const res = await problemApi.uploadTestcases(uploadTarget.value.problem_id, uploadFile.value)
     ElMessage.success(`上传成功，已登记 ${res?.test_cases ?? 0} 个测试点`)
-    uploadVisible.value = false
+    const data = await problemApi.getTestcases(uploadTarget.value.problem_id)
+    currentCases.value = data.test_cases ?? []
+    uploadFile.value = null
   } catch {
     ElMessage.error('上传失败')
   } finally {
@@ -410,19 +531,18 @@ async function doUpload() {
   }
 }
 
-async function handleRemoveProblem(row: ContestProblemSummary) {
-  if (!problemsTarget.value) return
+async function handleDeleteProblem(row: ContestProblemSummary) {
   try {
     await ElMessageBox.confirm(
-      `确认将题目 ${row.label} "${row.title}" 从比赛中移除？`,
-      '确认移除',
-      { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' }
+      `确认删除题目 ${row.label} "${row.title}"？将一并删除其测试数据与所有提交记录，不可恢复。`,
+      '确认删除',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
     )
   } catch { return }
 
   try {
-    await contestApi.removeProblem(problemsTarget.value.id, row.problem_id)
-    ElMessage.success('题目已移除')
+    await problemApi.remove(row.problem_id)
+    ElMessage.success('题目已删除')
     await refreshLinked()
   } catch { /* interceptor handles message */ }
 }
