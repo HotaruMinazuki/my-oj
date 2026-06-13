@@ -154,6 +154,14 @@ func (h *ContestHandler) GetProblems(c *gin.Context) {
 		}
 	}
 
+	// Problems stay hidden from non-admins until the contest actually starts —
+	// the client shows a countdown instead. Gating on the real clock (not the
+	// status column) prevents leaking problem labels/titles before the start.
+	if role != models.RoleAdmin && time.Now().Before(contest.StartTime) {
+		c.JSON(http.StatusOK, gin.H{"problems": []any{}, "not_started": true})
+		return
+	}
+
 	problems, err := h.contests.GetProblems(ctx, id)
 	if err != nil {
 		h.log.Error("get contest problems", zap.Error(err))

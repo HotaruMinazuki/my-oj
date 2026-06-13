@@ -65,11 +65,21 @@
             <span class="section-title">
               <el-icon><DocumentCopy /></el-icon> 题目列表
             </span>
-            <span v-if="!registered && contest.status !== 'ended'" class="register-hint">
+            <span v-if="!notStarted && !registered && contest.status !== 'ended'" class="register-hint">
               报名后可提交
             </span>
           </div>
         </template>
+
+        <!-- 未开始(非管理员): 隐藏题目, 只显示倒计时 -->
+        <div v-if="notStarted" class="cd-panel">
+          <el-icon class="cd-panel-icon"><Timer /></el-icon>
+          <div class="cd-panel-label">比赛尚未开始</div>
+          <div class="cd-panel-val">{{ cdFormatted }}</div>
+          <div class="cd-panel-hint">开始后即可查看题目并提交</div>
+        </div>
+
+        <template v-else>
         <el-skeleton v-if="loadingProblems" :rows="4" animated />
         <el-empty v-else-if="problems.length === 0" description="暂无题目" />
         <el-table v-else :data="problems" stripe style="width:100%">
@@ -104,6 +114,7 @@
             </template>
           </el-table-column>
         </el-table>
+        </template>
       </el-card>
 
       <!-- ── Submit dialog ── -->
@@ -190,6 +201,12 @@ const cdTarget = computed<string | null>(() => {
   return null
 })
 const { formatted: cdFormatted } = useCountdown(cdTarget)
+
+// Before the contest starts, non-admins see only a countdown — the problem list
+// (and the backend that feeds it) stay hidden until the start time passes.
+const notStarted = computed(() =>
+  !!contest.value && contest.value.status === 'ready' && !auth.isAdmin
+)
 
 const submitVisible = ref(false)
 const submitTarget  = ref<ContestProblemSummary | null>(null)
@@ -345,6 +362,27 @@ onMounted(() => { fetchContest(); fetchProblems() })
   font-weight: 700;
   font-size: 13px;
 }
+
+/* ── Countdown panel (problem list hidden before start) ── */
+.cd-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 16px;
+  text-align: center;
+}
+.cd-panel-icon  { font-size: 40px; color: var(--oj-primary); }
+.cd-panel-label { font-size: 16px; font-weight: 600; color: var(--oj-text-2); }
+.cd-panel-val {
+  font-size: 34px;
+  font-weight: 800;
+  color: var(--oj-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+}
+.cd-panel-hint { font-size: 13px; color: var(--oj-text-3); }
 
 /* ── Submit dialog ── */
 .dialog-footer {
