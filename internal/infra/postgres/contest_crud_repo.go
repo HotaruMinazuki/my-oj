@@ -325,6 +325,38 @@ func (r *ContestRepo) Delete(ctx context.Context, id models.ID) error {
 	return tx.Commit()
 }
 
+// ActiveContestForProblem returns the contest a submission for problemID should
+// count toward: a currently-running contest (start ≤ now ≤ end) that contains
+// the problem and that the user may submit to (public contest, or the user is a
+// registered participant). Returns nil when the problem is being practised
+// outside any live contest. If several match, the most recently started wins.
+func (r *ContestRepo) ActiveContestForProblem(ctx context.Context, problemID, userID models.ID) (*models.ID, error) {
+	const q = `
+SELECT c.id
+FROM   contest_problems cp
+JOIN   contests c ON c.id = cp.contest_id
+WHERE  cp.problem_id = $1
+  AND  c.start_time <= NOW() AND NOW() <= c.end_time
+  AND  (
+        c.is_public
+        OR EXISTS (
+             SELECT 1 FROM contest_participants p
+             WHERE p.contest_id = c.id AND p.user_id = $2)
+       )
+ORDER BY c.start_time DESC
+LIMIT 1`
+
+	var id models.ID
+	err := r.db.QueryRowContext(ctx, q, problemID, userID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("active contest for problem %d: %w", problemID, err)
+	}
+	return &id, nil
+}
+
 // ─── Register ─────────────────────────────────────────────────────────────────
 
 func (r *ContestRepo) Register(ctx context.Context, contestID, userID models.ID) error {

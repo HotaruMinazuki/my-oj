@@ -30,6 +30,9 @@ type ContestCRUDRepo interface {
 	CreateContestProblem(ctx context.Context, contestID models.ID, p *models.Problem, label string, maxScore, ordinal int) error
 	RemoveProblem(ctx context.Context, contestID, problemID models.ID) error
 	Delete(ctx context.Context, id models.ID) error
+	// ActiveContestForProblem resolves the running contest a problem submission
+	// should count toward (used to auto-attribute problem-page submissions).
+	ActiveContestForProblem(ctx context.Context, problemID, userID models.ID) (*models.ID, error)
 }
 
 // ContestHandler serves contest list, detail, registration, and admin endpoints.

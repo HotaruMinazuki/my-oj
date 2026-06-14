@@ -90,7 +90,7 @@
           </el-table-column>
           <el-table-column label="题目名称" min-width="220">
             <template #default="{ row }">
-              <router-link :to="`/problems/${row.problem_id}`" class="link-text">
+              <router-link :to="`/problems/${row.problem_id}?contest=${contest.id}`" class="link-text">
                 {{ row.title }}
               </router-link>
             </template>

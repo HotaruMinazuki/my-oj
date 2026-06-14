@@ -35,9 +35,14 @@ type ProblemRepo interface {
 }
 
 // SubmissionContestRepo resolves the contest a submission belongs to, so the
-// handler can apply format-specific visibility rules (ICPC hides testcases).
+// handler can apply format-specific visibility rules (ICPC hides testcases) and
+// auto-attribute problem-page submissions to a running contest.
 type SubmissionContestRepo interface {
 	GetByID(ctx context.Context, id models.ID) (*models.Contest, error)
+	// ActiveContestForProblem returns the contest a submission for this problem
+	// should count toward — a running contest containing the problem that the
+	// user may submit to (public or registered) — or nil for plain practice.
+	ActiveContestForProblem(ctx context.Context, problemID, userID models.ID) (*models.ID, error)
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -152,6 +157,16 @@ func (h *SubmissionHandler) SubmitPractice(c *gin.Context) {
 		return
 	}
 
+	// If the problem is part of a running contest the user can submit to, this
+	// "practice" submission actually counts toward that contest — so submitting
+	// from the problem page is just as valid as from the contest page.
+	contestID, err := h.contests.ActiveContestForProblem(ctx, req.ProblemID, userID)
+	if err != nil {
+		h.log.Error("resolve active contest", zap.Error(err), zap.Int64("problem_id", req.ProblemID))
+		// Non-fatal: fall back to plain practice rather than blocking the submission.
+		contestID = nil
+	}
+
 	sourceKey, ok := h.uploadSource(c, ctx, userID, req.ProblemID, req.Language, req.SourceCode)
 	if !ok {
 		return
@@ -160,6 +175,7 @@ func (h *SubmissionHandler) SubmitPractice(c *gin.Context) {
 	sub := &models.Submission{
 		UserID:         userID,
 		ProblemID:      req.ProblemID,
+		ContestID:      contestID, // nil → practice; non-nil → counts in the contest
 		Language:       req.Language,
 		SourceCodePath: sourceKey,
 		Status:         models.StatusPending,
@@ -172,7 +188,7 @@ func (h *SubmissionHandler) SubmitPractice(c *gin.Context) {
 		return
 	}
 
-	h.enqueueTask(c, ctx, sub, userID, nil, cfg, meta, testCases, sourceKey)
+	h.enqueueTask(c, ctx, sub, userID, contestID, cfg, meta, testCases, sourceKey)
 }
 
 // ─── GET /api/v1/submissions/:id ─────────────────────────────────────────────

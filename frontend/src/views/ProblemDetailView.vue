@@ -30,7 +30,12 @@
           <el-card shadow="never" class="submit-card">
             <template #header>
               <div class="submit-header">
-                <span>提交代码</span>
+                <span>
+                  提交代码
+                  <el-tag v-if="contestId" type="warning" size="small" effect="light" style="margin-left:6px">
+                    比赛提交
+                  </el-tag>
+                </span>
                 <el-select
                   v-model="lang"
                   size="small"
@@ -162,6 +167,13 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 const availableLangs = computed(() => problem.value?.allowed_langs?.length ? problem.value.allowed_langs : LANGS)
 const isTerminal     = computed(() => lastSubmission.value ? TERMINAL_STATUSES.includes(lastSubmission.value.status) : true)
 
+// When opened from a contest (link carries ?contest=ID), submissions count
+// toward that contest's scoreboard instead of being practice runs.
+const contestId = computed(() => {
+  const c = Number(route.query.contest)
+  return Number.isFinite(c) && c > 0 ? c : null
+})
+
 // Draft key includes problem ID + language so each language has its own draft
 const draftKey = computed(() =>
   problem.value ? `problem-${problem.value.id}-${lang.value}` : undefined
@@ -209,6 +221,10 @@ async function handleSubmit() {
   if (!code.value.trim()) { ElMessage.warning('请输入代码'); return }
   submitting.value = true
   try {
+    // Always submit through the practice endpoint. The backend authoritatively
+    // attributes the submission to a running contest if this problem belongs to
+    // one the user may submit to — so problem-page submissions count toward the
+    // scoreboard exactly when they should, regardless of how the user got here.
     const res = await submissionApi.submitPractice({
       problem_id:  problem.value!.id,
       language:    lang.value,
@@ -217,7 +233,7 @@ async function handleSubmit() {
     // The submit ack only contains {id,status}; let the first poll fill the rest.
     lastSubmission.value = null
     startPoll(res.id)
-    ElMessage.success('提交成功，评测中…')
+    ElMessage.success(contestId.value ? '已提交（计入比赛），评测中…' : '提交成功，评测中…')
   } finally {
     submitting.value = false
   }
