@@ -288,8 +288,10 @@ func (rs *RankingService) rebuildSnapshot(
 				solved++
 			}
 			cells[label] = BoardCell{
-				Solved:     e.Accepted,
-				Attempts:   e.AttemptCount,
+				Solved: e.Accepted,
+				// Attempts is the count of REJECTED submissions (penalty count),
+				// not total tries — a first-try AC has 0, so the board shows no "+N".
+				Attempts:   e.WrongAttemptCount,
 				Pending:    e.FrozenAttempts,
 				Penalty:    e.Penalty,
 				Score:      e.DisplayScore,

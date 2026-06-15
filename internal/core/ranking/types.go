@@ -54,7 +54,7 @@ const (
 // BoardCell is one (user, problem) cell on the rendered scoreboard.
 type BoardCell struct {
 	Solved     bool `json:"solved"`
-	Attempts   int  `json:"attempts"` // submissions counted on the public board
+	Attempts   int  `json:"attempts"` // REJECTED submissions (penalty count); 0 for a first-try AC
 	Pending    int  `json:"pending"`  // frozen submissions (shown as "?")
 	Penalty    int  `json:"penalty"`  // ICPC: minutes incl. WA penalty; OI: 0
 	Score      int  `json:"score"`    // OI/IOI display score; ICPC: 0/1

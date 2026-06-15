@@ -71,7 +71,10 @@
         <template #default="{ row }">
           <div :class="['prob-cell', cellClass(row.problems?.[label])]">
             <template v-if="row.problems?.[label]?.solved">
-              <div class="cell-top">+{{ row.problems[label].attempts }}</div>
+              <!-- ICPC: 仅当有错误提交(罚时次数>0)才显示 +N，一发通过不显示 -->
+              <div v-if="(row.problems[label].attempts ?? 0) > 0" class="cell-top">
+                +{{ row.problems[label].attempts }}
+              </div>
               <div class="cell-bot">{{ row.problems[label].penalty }}′</div>
             </template>
             <template v-else-if="(row.problems?.[label]?.pending ?? 0) > 0">
