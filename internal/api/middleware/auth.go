@@ -84,6 +84,17 @@ func UserIDFromCtx(c *gin.Context) (models.ID, bool) {
 	return id, ok
 }
 
+// RoleFromCtx extracts the authenticated user's role from a Gin context.
+// Returns ("", false) for unauthenticated requests (e.g. under OptionalAuth).
+func RoleFromCtx(c *gin.Context) (models.UserRole, bool) {
+	v, ok := c.Get(string(ContextKeyUserRole))
+	if !ok {
+		return "", false
+	}
+	role, ok := v.(models.UserRole)
+	return role, ok
+}
+
 // OptionalAuth tries to parse a Bearer token but never rejects the request.
 // Downstream handlers can check UserIDFromCtx to see if the user is authenticated.
 func OptionalAuth(signingKey []byte) gin.HandlerFunc {

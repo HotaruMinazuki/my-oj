@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -22,6 +23,9 @@ import (
 type AuthUserRepo interface {
 	Create(ctx context.Context, u *models.User) error
 	GetByUsername(ctx context.Context, username string) (*models.User, error)
+	GetByEmail(ctx context.Context, email string) (*models.User, error)
+	// GetByLogin resolves an identifier that may be a username or an email.
+	GetByLogin(ctx context.Context, identifier string) (*models.User, error)
 	GetByID(ctx context.Context, id models.ID) (*models.User, error)
 }
 
@@ -40,7 +44,9 @@ func NewAuthHandler(users AuthUserRepo, signingKey []byte, log *zap.Logger) *Aut
 
 type registerReq struct {
 	Username     string `json:"username"     binding:"required,min=3,max=32"`
-	Email        string `json:"email"        binding:"required,email"`
+	// Email is optional. When omitted the account starts unbound and can bind
+	// one later from the profile page.
+	Email        string `json:"email"        binding:"omitempty,email"`
 	Password     string `json:"password"     binding:"required,min=6"`
 	Organization string `json:"organization"`
 }
@@ -65,6 +71,22 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// Check email uniqueness (一个邮箱只能注册一个账号) when one is provided.
+	var emailPtr *string
+	if email := normalizeEmail(req.Email); email != "" {
+		taken, err := h.users.GetByEmail(c.Request.Context(), email)
+		if err != nil {
+			h.log.Error("register: check email", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+		if taken != nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
+			return
+		}
+		emailPtr = &email
+	}
+
 	hash, err := hashPassword(req.Password)
 	if err != nil {
 		h.log.Error("register: hash password", zap.Error(err))
@@ -74,7 +96,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	u := &models.User{
 		Username:     req.Username,
-		Email:        req.Email,
+		Email:        emailPtr,
 		PasswordHash: hash,
 		Role:         models.RoleContestant,
 		Organization: req.Organization,
@@ -101,6 +123,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 // ─── Login ────────────────────────────────────────────────────────────────────
 
 type loginReq struct {
+	// Username carries the login identifier — either a username or an email.
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
@@ -113,7 +136,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	u, err := h.users.GetByUsername(c.Request.Context(), req.Username)
+	u, err := h.users.GetByLogin(c.Request.Context(), strings.TrimSpace(req.Username))
 	if err != nil {
 		h.log.Error("login: get user", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
@@ -165,6 +188,18 @@ func (h *AuthHandler) issueToken(u *models.User) (string, error) {
 		},
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(h.signingKey)
+}
+
+// normalizeEmail trims and lowercases an email for consistent storage and
+// case-insensitive uniqueness. Returns "" for an empty/blank input.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// validEmail reports whether s parses as a single RFC 5322 address.
+func validEmail(s string) bool {
+	_, err := mail.ParseAddress(s)
+	return err == nil
 }
 
 // hashPassword returns "hex(sha256(salt||password)):hex(salt)".

@@ -75,6 +75,9 @@ func main() {
 		log.Fatal("postgres ping", zap.Error(err))
 	}
 	defer db.Close()
+	if err := postgres.RunStartupMigrations(ctx, db); err != nil {
+		log.Fatal("postgres migrate", zap.Error(err))
+	}
 	log.Info("PostgreSQL connected")
 
 	// ── Object storage (MinIO) ────────────────────────────────────────────────

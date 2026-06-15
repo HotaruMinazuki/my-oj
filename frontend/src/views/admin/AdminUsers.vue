@@ -21,7 +21,12 @@
             <router-link :to="`/users/${row.id}`" class="link-text">{{ row.username }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column label="邮箱" prop="email" min-width="200" />
+        <el-table-column label="邮箱" min-width="200">
+          <template #default="{ row }">
+            <span v-if="row.email">{{ row.email }}</span>
+            <span v-else class="empty-val">未绑定</span>
+          </template>
+        </el-table-column>
         <el-table-column label="单位" prop="organization" min-width="140">
           <template #default="{ row }">
             <span v-if="row.organization">{{ row.organization }}</span>

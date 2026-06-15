@@ -51,7 +51,7 @@ export const authApi = {
   login: (username: string, password: string) =>
     http.post<AuthResponse>('/auth/login', { username, password }).then(r => r.data),
 
-  register: (data: { username: string; email: string; password: string; organization?: string }) =>
+  register: (data: { username: string; email?: string; password: string; organization?: string }) =>
     http.post<AuthResponse>('/auth/register', data).then(r => r.data),
 
   me: () =>
@@ -160,9 +160,10 @@ export const userApi = {
   contests: (id: number) =>
     http.get<{ contests: Contest[] }>(`/users/${id}/contests`).then(r => r.data),
 
-  // Edit own profile (organization / 学校单位).
-  updateMe: (data: { organization: string }) =>
-    http.put<{ organization: string }>('/users/me', data).then(r => r.data),
+  // Edit own profile (organization / 学校单位). `email` is optional and binds an
+  // email when the account has none (one-shot — cannot change an existing one).
+  updateMe: (data: { organization: string; email?: string }) =>
+    http.put<{ organization: string; email?: string | null }>('/users/me', data).then(r => r.data),
 }
 
 // ─── Admin API (用户管理 / 全部提交) ──────────────────────────────────────────

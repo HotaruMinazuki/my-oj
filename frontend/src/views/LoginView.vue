@@ -21,7 +21,7 @@
         <el-form-item prop="username">
           <el-input
             v-model="form.username"
-            placeholder="用户名"
+            placeholder="用户名 / 邮箱"
             size="large"
             :prefix-icon="User"
             autocomplete="username"
@@ -74,8 +74,8 @@ const loading = ref(false)
 
 const form = reactive({ username: '', password: '' })
 const rules = {
-  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码',   trigger: 'blur' }],
+  username: [{ required: true, message: '请输入用户名或邮箱', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码',         trigger: 'blur' }],
 }
 
 async function handleLogin() {

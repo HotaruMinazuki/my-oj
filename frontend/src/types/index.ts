@@ -8,7 +8,8 @@ export type UserRole = 'admin' | 'contestant' | 'guest'
 export interface User {
   id: ID
   username: string
-  email: string
+  // Optional: an account may have no bound email (null/undefined when unbound).
+  email?: string | null
   role: UserRole
   organization?: string
   created_at?: string
@@ -110,10 +111,12 @@ export interface Submission {
 
 // ─── User profile (公开主页) ──────────────────────────────────────────────────
 
-// UserPublic is the public view of a user — no email, no sensitive fields.
+// UserPublic is the public view of a user. `email` is private and only present
+// in the response when the requester is the account owner or an admin.
 export interface UserPublic {
   id: ID
   username: string
+  email?: string | null
   role: UserRole
   organization?: string
   created_at: string

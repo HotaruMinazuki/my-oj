@@ -16,6 +16,15 @@
               <span v-if="user.organization">{{ user.organization }} · </span>
               注册于 {{ fmtDate(user.created_at) }}
             </div>
+            <!-- 邮箱: 仅本人 / 管理员可见 (不对外公布) -->
+            <div v-if="canSeeEmail" class="profile-email">
+              <el-icon><Message /></el-icon>
+              <span v-if="user.email">{{ user.email }}</span>
+              <template v-else>
+                <span class="empty-val">未绑定邮箱</span>
+                <el-button v-if="isMe" link type="primary" @click="openEdit">立即绑定</el-button>
+              </template>
+            </div>
           </div>
           <div class="profile-stats">
             <div class="stat">
@@ -43,6 +52,15 @@
         <el-form label-width="90px">
           <el-form-item label="学校/单位">
             <el-input v-model="editOrg" maxlength="100" placeholder="用于比赛排行榜与滚榜展示" show-word-limit />
+          </el-form-item>
+          <el-form-item label="邮箱">
+            <!-- 已绑定: 只读 (一个邮箱只能绑定一个账号, 绑定后不可自助修改) -->
+            <div v-if="user?.email" class="bound-email">
+              <span>{{ user.email }}</span>
+              <span class="hint">已绑定，如需修改请联系管理员</span>
+            </div>
+            <!-- 未绑定: 可填写绑定 -->
+            <el-input v-else v-model="editEmail" placeholder="绑定后可用邮箱登录（选填）" />
           </el-form-item>
         </el-form>
         <template #footer>
@@ -130,7 +148,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Edit } from '@element-plus/icons-vue'
+import { Edit, Message } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { userApi } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
@@ -141,6 +159,8 @@ const router = useRouter()
 const auth   = useAuthStore()
 
 const isMe = computed(() => auth.user?.id != null && auth.user.id === Number(route.params.id))
+// 邮箱不对外公布: 仅本人或管理员可见 (后端也只在这两种情况下返回 email 字段)。
+const canSeeEmail = computed(() => isMe.value || auth.isAdmin)
 
 const user    = ref<UserPublic | null>(null)
 const stats   = ref<UserSubmissionStats | null>(null)
@@ -159,27 +179,42 @@ const loadingContests = ref(false)
 // ── Profile edit (own profile only) ─────────────────────────────────────────
 const editVisible = ref(false)
 const editOrg     = ref('')
+const editEmail   = ref('')
 const saving      = ref(false)
 
 function openEdit() {
   editOrg.value = user.value?.organization ?? ''
+  editEmail.value = ''  // 仅未绑定时使用; 已绑定的邮箱只读展示
   editVisible.value = true
 }
 
 async function saveProfile() {
+  const email = editEmail.value.trim()
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    ElMessage.error('邮箱格式不正确')
+    return
+  }
   saving.value = true
   try {
-    const res = await userApi.updateMe({ organization: editOrg.value.trim() })
-    if (user.value) user.value.organization = res.organization
+    const payload: { organization: string; email?: string } = { organization: editOrg.value.trim() }
+    // 仅在当前未绑定且填写了邮箱时尝试绑定。
+    if (email && !user.value?.email) payload.email = email
+
+    const res = await userApi.updateMe(payload)
+    if (user.value) {
+      user.value.organization = res.organization
+      if (res.email !== undefined) user.value.email = res.email
+    }
     // Keep the auth store / localStorage copy in sync.
     if (auth.user) {
       auth.user.organization = res.organization
+      if (res.email !== undefined) auth.user.email = res.email
       localStorage.setItem('oj_user', JSON.stringify(auth.user))
     }
     editVisible.value = false
     ElMessage.success('已保存')
   } catch {
-    ElMessage.error('保存失败')
+    // 错误信息已由 http 拦截器统一提示 (如邮箱已被占用)。
   } finally {
     saving.value = false
   }
@@ -275,6 +310,17 @@ watch(() => route.params.id, () => {
   gap: 8px;
 }
 .profile-sub { color: var(--oj-text-3); font-size: 13px; margin-top: 4px; }
+.profile-email {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--oj-text-3);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.profile-email .empty-val { color: var(--oj-text-3); }
+.bound-email { display: flex; flex-direction: column; line-height: 1.5; }
+.bound-email .hint { color: var(--oj-text-3); font-size: 12px; }
 
 .profile-stats { display: flex; gap: 28px; }
 .edit-btn { flex-shrink: 0; }

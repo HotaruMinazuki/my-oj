@@ -30,7 +30,7 @@
         <el-form-item prop="email">
           <el-input
             v-model="form.email"
-            placeholder="邮箱"
+            placeholder="邮箱（选填，可用于登录）"
             size="large"
             :prefix-icon="Message"
             autocomplete="email"
@@ -90,7 +90,8 @@ const loading = ref(false)
 const form = reactive({ username: '', email: '', password: '', organization: '' })
 const rules = {
   username: [{ required: true, min: 3, max: 32, message: '请输入 3-32 个字符的用户名', trigger: 'blur' }],
-  email:    [{ required: true, type: 'email' as const, message: '邮箱格式不正确', trigger: 'blur' }],
+  // Email is optional; only validate the format when something is entered.
+  email:    [{ type: 'email' as const, message: '邮箱格式不正确', trigger: 'blur' }],
   password: [{ required: true, min: 6, message: '密码至少 6 位', trigger: 'blur' }],
 }
 
@@ -99,7 +100,9 @@ async function handleRegister() {
   if (!valid) return
   loading.value = true
   try {
-    await auth.register(form)
+    // Omit email entirely when blank so the account registers unbound.
+    const email = form.email.trim()
+    await auth.register({ ...form, email: email || undefined })
     ElMessage.success('注册成功，欢迎加入！')
     router.push('/')
   } finally {

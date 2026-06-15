@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/your-org/my-oj/internal/api/middleware"
 	"github.com/your-org/my-oj/internal/infra/postgres"
 	"github.com/your-org/my-oj/internal/models"
 )
@@ -18,8 +20,11 @@ import (
 // UserDirectoryRepo provides user lookup, admin search, and profile updates.
 type UserDirectoryRepo interface {
 	GetByID(ctx context.Context, id models.ID) (*models.User, error)
+	GetByEmail(ctx context.Context, email string) (*models.User, error)
 	Search(ctx context.Context, q string, limit, offset int) ([]models.User, int, error)
 	UpdateProfile(ctx context.Context, id models.ID, organization string) error
+	// BindEmail attaches an email to an account that has none (one-shot).
+	BindEmail(ctx context.Context, id models.ID, email string) error
 }
 
 // SubmissionHistoryRepo lists submissions (newest first) and per-user stats.
@@ -56,7 +61,8 @@ func NewUserHandler(
 // ─── GET /api/v1/users/:id ────────────────────────────────────────────────────
 
 // GetProfile returns a user's public profile with submission stats.
-// Email is intentionally omitted — profiles are public, mailboxes are not.
+// Email is private (不对外公布): it is included only when the requester is the
+// account owner or an admin (管理员可以看到).
 func (h *UserHandler) GetProfile(c *gin.Context) {
 	id, ok := parseUserID(c)
 	if !ok {
@@ -82,14 +88,22 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 		return
 	}
 
+	profile := gin.H{
+		"id":           u.ID,
+		"username":     u.Username,
+		"role":         u.Role,
+		"organization": u.Organization,
+		"created_at":   u.CreatedAt,
+	}
+	// Owner or admin may see the (private) email; null when unbound.
+	reqID, _ := middleware.UserIDFromCtx(c)
+	role, _ := middleware.RoleFromCtx(c)
+	if reqID == id || role == models.RoleAdmin {
+		profile["email"] = u.Email
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"user": gin.H{
-			"id":           u.ID,
-			"username":     u.Username,
-			"role":         u.Role,
-			"organization": u.Organization,
-			"created_at":   u.CreatedAt,
-		},
+		"user":  profile,
 		"stats": stats,
 	})
 }
@@ -98,11 +112,14 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 
 type updateProfileReq struct {
 	Organization string `json:"organization"`
+	// Email, when present and non-empty, binds an email to an account that has
+	// none. Binding is one-shot: an already-bound email cannot be changed here.
+	Email *string `json:"email"`
 }
 
 // UpdateMe lets the authenticated user edit their own profile. The organization
 // (学校/单位) is shown on the profile and used as the team affiliation in the
-// contest resolver XML export.
+// contest resolver XML export. It can also bind an email if none is set yet.
 func (h *UserHandler) UpdateMe(c *gin.Context) {
 	uid, ok := mustUserID(c)
 	if !ok {
@@ -117,13 +134,83 @@ func (h *UserHandler) UpdateMe(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "organization too long (max 100 chars)"})
 		return
 	}
+	ctx := c.Request.Context()
 
-	if err := h.users.UpdateProfile(c.Request.Context(), uid, strings.TrimSpace(req.Organization)); err != nil {
+	// Optional email binding.
+	if req.Email != nil {
+		if email := normalizeEmail(*req.Email); email != "" {
+			if !h.bindEmail(c, uid, email) {
+				return // bindEmail already wrote the error response
+			}
+		}
+	}
+
+	if err := h.users.UpdateProfile(ctx, uid, strings.TrimSpace(req.Organization)); err != nil {
 		h.log.Error("update profile", zap.Error(err), zap.Int64("user_id", uid))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"organization": strings.TrimSpace(req.Organization)})
+
+	// Return the current email so the client can refresh its cached user.
+	u, err := h.users.GetByID(ctx, uid)
+	if err != nil || u == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"organization": strings.TrimSpace(req.Organization),
+		"email":        u.Email,
+	})
+}
+
+// bindEmail validates and binds an email to the account, writing the
+// appropriate error response and returning false on failure.
+func (h *UserHandler) bindEmail(c *gin.Context, uid models.ID, email string) bool {
+	ctx := c.Request.Context()
+	if !validEmail(email) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "邮箱格式不正确"})
+		return false
+	}
+
+	// Already bound? Binding is one-shot for self-service.
+	me, err := h.users.GetByID(ctx, uid)
+	if err != nil || me == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return false
+	}
+	if me.Email != nil {
+		if normalizeEmail(*me.Email) == email {
+			return true // no-op: same email already bound
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "邮箱已绑定，如需修改请联系管理员"})
+		return false
+	}
+
+	// Uniqueness (一个邮箱只能注册一个账号).
+	taken, err := h.users.GetByEmail(ctx, email)
+	if err != nil {
+		h.log.Error("bind email: check unique", zap.Error(err), zap.Int64("user_id", uid))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return false
+	}
+	if taken != nil && taken.ID != uid {
+		c.JSON(http.StatusConflict, gin.H{"error": "该邮箱已被占用"})
+		return false
+	}
+
+	if err := h.users.BindEmail(ctx, uid, email); err != nil {
+		switch {
+		case errors.Is(err, postgres.ErrEmailTaken):
+			c.JSON(http.StatusConflict, gin.H{"error": "该邮箱已被占用"})
+		case errors.Is(err, postgres.ErrEmailAlreadyBound):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "邮箱已绑定，如需修改请联系管理员"})
+		default:
+			h.log.Error("bind email", zap.Error(err), zap.Int64("user_id", uid))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		}
+		return false
+	}
+	return true
 }
 
 // ─── GET /api/v1/users/:id/submissions ────────────────────────────────────────

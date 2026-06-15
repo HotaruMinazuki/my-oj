@@ -10,7 +10,9 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS users (
     id            BIGSERIAL   PRIMARY KEY,
     username      TEXT        NOT NULL UNIQUE,
-    email         TEXT        NOT NULL UNIQUE,
+    -- Optional: accounts may exist without an email and bind one later.
+    -- UNIQUE still enforces "one email = one account" (Postgres allows many NULLs).
+    email         TEXT        UNIQUE,
     password_hash TEXT        NOT NULL,
     role          TEXT        NOT NULL DEFAULT 'contestant',   -- admin | contestant | guest
     organization  TEXT        NOT NULL DEFAULT '',
