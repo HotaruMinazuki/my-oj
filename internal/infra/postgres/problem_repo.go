@@ -98,6 +98,11 @@ ORDER  BY group_id, ordinal`
 // ReplaceTestCases atomically replaces all test-case rows of a problem.
 // Called by the admin testcase-upload endpoint after the zip is stored in MinIO,
 // so the DB metadata always mirrors the latest uploaded archive.
+//
+// It also syncs contest_problems.max_score for this problem to the sum of the new
+// per-case scores: that sum IS the problem's OI/IOI full mark, so the contest's
+// displayed 分值 stays consistent with what actually gets scored. Problems not in
+// any contest simply update zero rows.
 func (r *ProblemRepo) ReplaceTestCases(ctx context.Context, problemID models.ID, cases []models.JudgeTestCase) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -112,12 +117,21 @@ func (r *ProblemRepo) ReplaceTestCases(ctx context.Context, problemID models.ID,
 	const ins = `
 INSERT INTO test_cases (problem_id, group_id, ordinal, input_path, output_path, score, is_sample)
 VALUES ($1, $2, $3, $4, $5, $6, FALSE)`
+	totalScore := 0
 	for _, tc := range cases {
 		if _, err := tx.ExecContext(ctx, ins,
 			problemID, tc.GroupID, tc.Ordinal, tc.InputPath, tc.OutputPath, tc.Score,
 		); err != nil {
 			return fmt.Errorf("insert test case %d for problem %d: %w", tc.Ordinal, problemID, err)
 		}
+		totalScore += tc.Score
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE contest_problems SET max_score = $2 WHERE problem_id = $1`,
+		problemID, totalScore,
+	); err != nil {
+		return fmt.Errorf("sync contest max_score for problem %d: %w", problemID, err)
 	}
 	return tx.Commit()
 }

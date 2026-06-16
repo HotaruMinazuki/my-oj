@@ -87,10 +87,13 @@ export const problemApi = {
   getTestcases: (id: number) =>
     http.get<{ test_cases: TestCaseInfo[]; count: number }>(`/admin/problems/${id}/testcases`).then(r => r.data),
 
-  uploadTestcases: (id: number, file: File) => {
+  // totalScore is the problem's full mark (OI/IOI 分值); the backend splits it
+  // evenly across the uploaded test points. Omitted → backend defaults to 100.
+  uploadTestcases: (id: number, file: File, totalScore?: number) => {
     const fd = new FormData()
     fd.append('file', file)
-    return http.post<{ test_cases: number; files: string[]; warnings: string[] }>(
+    if (totalScore != null) fd.append('total_score', String(totalScore))
+    return http.post<{ test_cases: number; total_score: number; files: string[]; warnings: string[] }>(
       `/admin/problems/${id}/testcases`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' }
       }).then(r => r.data)

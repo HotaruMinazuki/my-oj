@@ -257,6 +257,13 @@
       <el-alert type="warning" :closable="false" show-icon style="margin-bottom:16px">
         重新上传将<strong>覆盖</strong>现有全部测试数据。压缩包直接包含 1.in, 1.out, 2.in, 2.out … 的 .zip。
       </el-alert>
+
+      <div class="score-row">
+        <span class="score-label">本题满分(分值)</span>
+        <el-input-number v-model="uploadScore" :min="1" :max="100000" :step="10" />
+        <span class="score-hint">OI/IOI 计分：满分平均分配到各测试点（整数，余数给最后一个点）</span>
+      </div>
+
       <el-upload
         drag
         action="#"
@@ -529,11 +536,13 @@ const uploadTarget  = ref<ContestProblemSummary | null>(null)
 const uploadFile    = ref<File | null>(null)
 const uploading     = ref(false)
 const currentCases  = ref<TestCaseInfo[]>([])
+const uploadScore   = ref(100)
 
 async function openUpload(row: ContestProblemSummary) {
   uploadTarget.value = row
   uploadFile.value   = null
   currentCases.value = []
+  uploadScore.value  = row.max_score || 100
   uploadVisible.value = true
   try {
     const data = await problemApi.getTestcases(row.problem_id)
@@ -550,11 +559,13 @@ async function doUpload() {
   if (!uploadFile.value) { ElMessage.warning('请先选择 .zip 文件'); return }
   uploading.value = true
   try {
-    const res = await problemApi.uploadTestcases(uploadTarget.value.problem_id, uploadFile.value)
-    ElMessage.success(`上传成功，已登记 ${res?.test_cases ?? 0} 个测试点`)
+    const res = await problemApi.uploadTestcases(uploadTarget.value.problem_id, uploadFile.value, uploadScore.value)
+    ElMessage.success(`上传成功：${res?.test_cases ?? 0} 个测试点，满分 ${res?.total_score ?? uploadScore.value} 分`)
     const data = await problemApi.getTestcases(uploadTarget.value.problem_id)
     currentCases.value = data.test_cases ?? []
     uploadFile.value = null
+    // 满分已随测试数据同步到本场题目, 刷新列表让"分值"列即时更新。
+    await refreshLinked()
   } catch {
     ElMessage.error('上传失败')
   } finally {
@@ -617,5 +628,9 @@ onMounted(fetch)
 
 .newprob-form { max-width: 560px; }
 .unit { color: var(--oj-text-3); font-size: 12px; margin-left: 6px; }
+
+.score-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.score-label { font-size: 13px; font-weight: 600; color: var(--oj-text-2); }
+.score-hint { font-size: 12px; color: var(--oj-text-3); }
 .empty-hint { color: var(--oj-text-3); font-size: 13px; }
 </style>

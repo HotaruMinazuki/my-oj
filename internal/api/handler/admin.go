@@ -110,6 +110,18 @@ func (h *AdminHandler) UploadTestcases(c *gin.Context) {
 		return
 	}
 
+	// total_score is the problem's full mark (OI/IOI 分值), decided by the admin and
+	// split evenly across the test points. Defaults to 100 when omitted.
+	totalScore := 100
+	if v := c.PostForm("total_score"); v != "" {
+		n, convErr := strconv.Atoi(v)
+		if convErr != nil || n < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "total_score must be a positive integer"})
+			return
+		}
+		totalScore = n
+	}
+
 	// ── Validate filename extension ───────────────────────────────────────────
 	if !strings.EqualFold(filepath.Ext(fh.Filename), ".zip") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "uploaded file must have a .zip extension"})
@@ -141,7 +153,7 @@ func (h *AdminHandler) UploadTestcases(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("cannot parse zip: %v", err)})
 		return
 	}
-	cases, files, warns, parseErr := parseTestcaseEntries(zr)
+	cases, files, warns, parseErr := parseTestcaseEntries(zr, totalScore)
 	if parseErr != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": parseErr.Error(), "files": files})
 		return
@@ -175,11 +187,12 @@ func (h *AdminHandler) UploadTestcases(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"key":        key,
-		"size":       fh.Size,
-		"files":      files,
-		"test_cases": len(cases),
-		"warnings":   warns,
+		"key":         key,
+		"size":        fh.Size,
+		"files":       files,
+		"test_cases":  len(cases),
+		"total_score": totalScore,
+		"warnings":    warns,
 	})
 }
 
@@ -189,9 +202,11 @@ var (
 )
 
 // parseTestcaseEntries maps zip entries (flat layout: "1.in", "1.out", ...) to
-// JudgeTestCase rows. Per-case score is an equal share of 100 (remainder goes
-// to the last case) so OI/IOI scoring works without per-case configuration.
-func parseTestcaseEntries(zr *zip.Reader) (cases []models.JudgeTestCase, files, warns []string, err error) {
+// JudgeTestCase rows. The problem's full score (totalScore, decided by the admin)
+// is split as an equal integer share across the test points, with the remainder
+// added to the last case so the per-case scores sum exactly to totalScore — the
+// problem's OI/IOI maximum.
+func parseTestcaseEntries(zr *zip.Reader, totalScore int) (cases []models.JudgeTestCase, files, warns []string, err error) {
 	ins := map[int]string{}
 	outs := map[int]string{}
 
@@ -223,7 +238,7 @@ func parseTestcaseEntries(zr *zip.Reader) (cases []models.JudgeTestCase, files, 
 	}
 	sort.Ints(nums)
 
-	base, rem := 100/len(nums), 100%len(nums)
+	base, rem := totalScore/len(nums), totalScore%len(nums)
 	for i, n := range nums {
 		outPath := outs[n]
 		if outPath == "" {

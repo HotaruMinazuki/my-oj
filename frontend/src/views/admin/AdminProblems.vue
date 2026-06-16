@@ -126,6 +126,13 @@
       <el-alert type="warning" :closable="false" show-icon style="margin-bottom:16px">
         重新上传将<strong>覆盖</strong>现有全部测试数据。压缩包直接包含 1.in, 1.out, 2.in, 2.out … 的 .zip。
       </el-alert>
+
+      <div class="score-row">
+        <span class="score-label">本题满分(分值)</span>
+        <el-input-number v-model="uploadScore" :min="1" :max="100000" :step="10" />
+        <span class="score-hint">OI/IOI 计分：满分平均分配到各测试点（整数，余数给最后一个点）</span>
+      </div>
+
       <el-upload
         drag
         action="#"
@@ -173,6 +180,7 @@ const uploadTarget  = ref<Problem | null>(null)
 const uploadFile    = ref<File | null>(null)
 const uploading     = ref(false)
 const currentCases  = ref<TestCaseInfo[]>([])
+const uploadScore   = ref(100)
 
 // ── Edit problem ─────────────────────────────────────────────────────────────
 const editDialog  = ref(false)
@@ -256,10 +264,14 @@ async function openUpload(row: Problem) {
   uploadTarget.value = row
   uploadFile.value   = null
   currentCases.value = []
+  uploadScore.value  = 100
   uploadDialog.value = true
   try {
     const data = await problemApi.getTestcases(row.id)
     currentCases.value = data.test_cases ?? []
+    // Pre-fill 满分 with the existing total so a re-upload keeps it unless changed.
+    const sum = currentCases.value.reduce((acc, t) => acc + (t.score ?? 0), 0)
+    if (sum > 0) uploadScore.value = sum
   } catch { /* ignore */ }
 }
 function onFileChange(file: UploadFile) {
@@ -270,8 +282,8 @@ async function handleUpload() {
   if (!uploadTarget.value) { ElMessage.warning('目标题目丢失'); return }
   uploading.value = true
   try {
-    const res = await problemApi.uploadTestcases(uploadTarget.value.id, uploadFile.value)
-    ElMessage.success(`上传成功，已登记 ${res?.test_cases ?? 0} 个测试点`)
+    const res = await problemApi.uploadTestcases(uploadTarget.value.id, uploadFile.value, uploadScore.value)
+    ElMessage.success(`上传成功：${res?.test_cases ?? 0} 个测试点，满分 ${res?.total_score ?? uploadScore.value} 分`)
     // Refresh current-data view to reflect the overwrite.
     const data = await problemApi.getTestcases(uploadTarget.value.id)
     currentCases.value = data.test_cases ?? []
@@ -287,4 +299,7 @@ onMounted(fetch)
 .page-header h2 { margin:0; }
 .pagination { display:flex; justify-content:flex-end; margin-top:16px; }
 .section-sub { font-size:13px; font-weight:600; color:var(--oj-text-2); margin:0 0 8px; }
+.score-row { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+.score-label { font-size:13px; font-weight:600; color:var(--oj-text-2); }
+.score-hint { font-size:12px; color:var(--oj-text-3); }
 </style>
