@@ -134,6 +134,7 @@
       </div>
 
       <el-upload
+        ref="dataUploadRef"
         drag
         action="#"
         accept=".zip"
@@ -156,7 +157,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { Plus, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { FormInstance, UploadFile } from 'element-plus'
+import type { FormInstance, UploadFile, UploadInstance } from 'element-plus'
 import { problemApi } from '@/api/http'
 import type { TestCaseInfo } from '@/api/http'
 import type { Problem, JudgeType } from '@/types'
@@ -181,6 +182,7 @@ const uploadFile    = ref<File | null>(null)
 const uploading     = ref(false)
 const currentCases  = ref<TestCaseInfo[]>([])
 const uploadScore   = ref(100)
+const dataUploadRef = ref<UploadInstance>()
 
 // ── Edit problem ─────────────────────────────────────────────────────────────
 const editDialog  = ref(false)
@@ -265,6 +267,7 @@ async function openUpload(row: Problem) {
   uploadFile.value   = null
   currentCases.value = []
   uploadScore.value  = 100
+  dataUploadRef.value?.clearFiles()
   uploadDialog.value = true
   try {
     const data = await problemApi.getTestcases(row.id)
@@ -288,6 +291,7 @@ async function handleUpload() {
     const data = await problemApi.getTestcases(uploadTarget.value.id)
     currentCases.value = data.test_cases ?? []
     uploadFile.value = null
+    dataUploadRef.value?.clearFiles()
   } finally { uploading.value = false }
 }
 

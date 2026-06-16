@@ -265,6 +265,7 @@
       </div>
 
       <el-upload
+        ref="dataUploadRef"
         drag
         action="#"
         accept=".zip"
@@ -287,7 +288,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { Plus, Delete, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { FormInstance, UploadFile } from 'element-plus'
+import type { FormInstance, UploadFile, UploadInstance } from 'element-plus'
 import dayjs from 'dayjs'
 import { contestApi, problemApi, adminApi } from '@/api/http'
 import type { TestCaseInfo } from '@/api/http'
@@ -537,12 +538,14 @@ const uploadFile    = ref<File | null>(null)
 const uploading     = ref(false)
 const currentCases  = ref<TestCaseInfo[]>([])
 const uploadScore   = ref(100)
+const dataUploadRef = ref<UploadInstance>()
 
 async function openUpload(row: ContestProblemSummary) {
   uploadTarget.value = row
   uploadFile.value   = null
   currentCases.value = []
   uploadScore.value  = row.max_score || 100
+  dataUploadRef.value?.clearFiles()
   uploadVisible.value = true
   try {
     const data = await problemApi.getTestcases(row.problem_id)
@@ -564,6 +567,7 @@ async function doUpload() {
     const data = await problemApi.getTestcases(uploadTarget.value.problem_id)
     currentCases.value = data.test_cases ?? []
     uploadFile.value = null
+    dataUploadRef.value?.clearFiles()
     // 满分已随测试数据同步到本场题目, 刷新列表让"分值"列即时更新。
     await refreshLinked()
   } catch {
