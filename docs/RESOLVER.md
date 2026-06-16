@@ -22,12 +22,15 @@
 
 该文件包含：
 
-- `<info>`：比赛标题、总时长、封榜时长（由封榜时间推导）、罚时（penalty_minutes）、开始时间
+- `<info>`：比赛标题、总时长、封榜时长（无封榜时输出 `0:00:00`，**不可省略**，
+  否则 Resolver 的 checkContestState 会空指针）、罚时（penalty_minutes）、开始时间
 - `<judgement>`：判定类型定义（AC/WA/TLE/MLE/RTE/CE）。**必须有**，否则 Resolver 无法把
   `<run>` 的结果识别为已判，会报 "unjudged submissions" 并拒绝滚榜
 - `<problem>`：每道题的题号（A/B/C…）与标题
 - `<team>`：每个参赛者（已报名者 + 有提交者）的 id / 队名 / 学校
 - `<run>`：每次已判定提交（AC/WA/TLE/MLE/RTE/CE），含相对时间、是否通过、是否计罚时
+- `<finalized>`：比赛结束标记。**必须有**，否则 Resolver 报 "Contest is not over"。
+  奖牌边界这里填 0，真正数量由 `awards.bat --medals` 决定
 
 > 仅导出最终判定状态的提交；Pending/评测中/SystemError 不计入。比赛结束后的提交不计入。
 

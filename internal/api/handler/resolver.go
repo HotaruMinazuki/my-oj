@@ -98,6 +98,17 @@ type xmlContest struct {
 	Problems   []xmlProblem       `xml:"problem"`
 	Teams      []xmlTeam          `xml:"team"`
 	Runs       []xmlRun           `xml:"run"`
+	// Finalized must be emitted last (after runs). Its presence makes the parser
+	// mark the contest ended/finalized, otherwise the Resolver refuses to run
+	// with "Contest is not over. Use --test...". Medal boundaries here are 0;
+	// the actual counts come from awards.bat's --medals.
+	Finalized *xmlFinalized `xml:"finalized"`
+}
+
+type xmlFinalized struct {
+	LastGold   int `xml:"last-gold"`
+	LastSilver int `xml:"last-silver"`
+	LastBronze int `xml:"last-bronze"`
 }
 
 // xmlJudgementType is a top-level <judgement> verdict definition. The Resolver's
@@ -123,13 +134,13 @@ var standardJudgementTypes = []xmlJudgementType{
 }
 
 type xmlInfo struct {
-	ContestID     string `xml:"contest-id"`
-	Title         string `xml:"title"`
-	Length        string `xml:"length"`
-	FreezeLength  string `xml:"scoreboard-freeze-length,omitempty"`
-	Penalty       int    `xml:"penalty"`
-	Started       bool   `xml:"started"`
-	StartTime     string `xml:"starttime"`
+	ContestID    string `xml:"contest-id"`
+	Title        string `xml:"title"`
+	Length       string `xml:"length"`
+	FreezeLength string `xml:"scoreboard-freeze-length"`
+	Penalty      int    `xml:"penalty"`
+	Started      bool   `xml:"started"`
+	StartTime    string `xml:"starttime"`
 }
 
 type xmlProblem struct {
@@ -174,15 +185,24 @@ func buildEventFeed(
 		ContestID: fmt.Sprintf("%d", contest.ID),
 		Title:     contest.Title,
 		Length:    hms(contest.EndTime.Sub(contest.StartTime).Seconds()),
-		Penalty:   penalty,
-		Started:   true,
-		StartTime: fmt.Sprintf("%.0f", float64(contest.StartTime.Unix())),
+		// Always present: a missing freeze duration makes the Resolver's
+		// checkContestState NPE on getFreezeDuration().longValue(). "0:00:00"
+		// means no freeze.
+		FreezeLength: "0:00:00",
+		Penalty:      penalty,
+		Started:      true,
+		StartTime:    fmt.Sprintf("%.0f", float64(contest.StartTime.Unix())),
 	}
 	if contest.FreezeTime != nil && contest.FreezeTime.Before(contest.EndTime) {
 		info.FreezeLength = hms(contest.EndTime.Sub(*contest.FreezeTime).Seconds())
 	}
 
-	feed := &xmlContest{Info: info, Judgements: standardJudgementTypes}
+	feed := &xmlContest{
+		Info:       info,
+		Judgements: standardJudgementTypes,
+		// Mark the contest finalized so the Resolver treats it as over.
+		Finalized: &xmlFinalized{},
+	}
 
 	for _, p := range problems {
 		feed.Problems = append(feed.Problems, xmlProblem{
