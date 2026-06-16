@@ -10,6 +10,9 @@ frontend/dist/
 # ── Resolver (滚榜) tool: large third-party binaries, kept locally only ──
 滚榜/
 
+# ── Secrets (运维在服务器手动创建, 切勿提交真实密钥) ──
+.env
+
 # ── Editor / OS ──
 .idea/
 .DS_Store

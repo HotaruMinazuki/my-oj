@@ -15,12 +15,12 @@ services:
     environment:
       POSTGRES_DB:       oj
       POSTGRES_USER:     oj
-      POSTGRES_PASSWORD: oj_secret
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d:ro
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     networks:
       - oj-net
     healthcheck:
@@ -41,7 +41,7 @@ services:
     volumes:
       - redis-data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     networks:
       - oj-net
     healthcheck:
@@ -55,13 +55,13 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER:     minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER:     ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - minio-data:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     networks:
       - oj-net
     healthcheck:
@@ -78,8 +78,8 @@ services:
     networks:
       - oj-net
     environment:
-      MINIO_ROOT_USER:     minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER:     ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - ./scripts/minio-init.sh:/init.sh:ro
     entrypoint: ["sh", "/init.sh"]
@@ -101,12 +101,12 @@ services:
       OJ_ENV: production
     command:
       - "-addr=:8080"
-      - "-dsn=postgres://oj:oj_secret@postgres:5432/oj?sslmode=disable"
+      - "-dsn=postgres://oj:${POSTGRES_PASSWORD}@postgres:5432/oj?sslmode=disable"
       - "-redis-addr=redis:6379"
       - "-minio-addr=minio:9000"
-      - "-minio-key=minioadmin"
-      - "-minio-secret=minioadmin"
-      - "-jwt-key=change-me-in-production"
+      - "-minio-key=${MINIO_ROOT_USER}"
+      - "-minio-secret=${MINIO_ROOT_PASSWORD}"
+      - "-jwt-key=${JWT_SECRET}"
       - "-log-level=info"
       # 找回密码邮件: 未配置 SMTP 时验证码仅写入容器日志; 配置后真正发送。
       # 163 邮箱示例 (-smtp-pass 填“客户端授权码”而非登录密码), 取消注释并替换:
@@ -157,8 +157,8 @@ services:
     command:
       - "-redis=redis:6379"
       - "-minio-addr=minio:9000"
-      - "-minio-key=minioadmin"
-      - "-minio-secret=minioadmin"
+      - "-minio-key=${MINIO_ROOT_USER}"
+      - "-minio-secret=${MINIO_ROOT_PASSWORD}"
       - "-workdir=/tmp/oj-judge"
       - "-workers=2"
       - "-nsjail=/usr/local/bin/nsjail"

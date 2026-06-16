@@ -58,8 +58,8 @@ func main() {
 	appName     := flag.String("app-name",     "OJ",             "Application name shown in emails")
 	flag.Parse()
 
-	if *jwtKey == "" {
-		fmt.Fprintln(os.Stderr, "api-server: -jwt-key is required")
+	if *jwtKey == "" || *jwtKey == "change-me-in-production" || len(*jwtKey) < 32 {
+		fmt.Fprintln(os.Stderr, "api-server: -jwt-key 太弱，请用 >=32 字节随机值 (openssl rand -hex 32)")
 		os.Exit(1)
 	}
 	if *dsn == "" {
