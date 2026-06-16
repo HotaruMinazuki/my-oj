@@ -145,6 +145,9 @@ func NewServer(
 		// Authenticated routes
 		authed := v1.Group("/", auth)
 		{
+			// Source code is private: only the author or an admin may read it.
+			authed.GET("/submissions/:id/source", submissionH.GetSubmissionSource)
+
 			// Edit own profile (organization/学校, used by resolver export).
 			authed.PUT("/users/me", userH.UpdateMe)
 			// Change own password (verifies the current password).

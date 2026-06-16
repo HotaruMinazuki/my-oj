@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -379,6 +380,60 @@ func (h *SubmissionHandler) GetSubmission(c *gin.Context) {
 
 	h.applyContestVisibility(c, sub)
 	c.JSON(http.StatusOK, sub)
+}
+
+// ─── GET /api/v1/submissions/:id/source ──────────────────────────────────────
+
+// GetSubmissionSource returns the raw source code of a submission, fetched from
+// MinIO. Unlike GetSubmission (public), the source is PRIVATE: only the
+// submission's author and admins may read it. This prevents contestants from
+// copying each other's solutions — during a running contest and afterwards.
+func (h *SubmissionHandler) GetSubmissionSource(c *gin.Context) {
+	id64, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id64 <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid submission id"})
+		return
+	}
+
+	sub, err := h.submissions.GetByID(c.Request.Context(), models.ID(id64))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "submission not found"})
+		return
+	}
+
+	// Authorization: the author or an admin only.
+	userID, _ := middleware.UserIDFromCtx(c)
+	role, _ := middleware.RoleFromCtx(c)
+	if role != models.RoleAdmin && userID != sub.UserID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权查看该提交的源代码"})
+		return
+	}
+
+	if sub.SourceCodePath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "源代码不存在"})
+		return
+	}
+
+	rc, err := h.store.Get(c.Request.Context(), storage.BucketSubmissions, sub.SourceCodePath)
+	if err != nil {
+		h.log.Error("fetch submission source", zap.Error(err),
+			zap.Int64("submission_id", sub.ID), zap.String("key", sub.SourceCodePath))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取源代码失败"})
+		return
+	}
+	defer rc.Close()
+
+	code, err := io.ReadAll(rc)
+	if err != nil {
+		h.log.Error("read submission source body", zap.Error(err), zap.Int64("submission_id", sub.ID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取源代码失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"language":    sub.Language,
+		"source_code": string(code),
+	})
 }
 
 // applyContestVisibility enforces format-specific result visibility for non-admin

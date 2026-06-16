@@ -157,6 +157,11 @@ export const submissionApi = {
 
   get: (id: number) =>
     http.get<Submission>(`/submissions/${id}`).then(r => r.data),
+
+  // Source code is private — only the submission's author and admins may read it
+  // (separate authenticated endpoint). Returns the raw code and its language.
+  getSource: (id: number) =>
+    http.get<{ language: string; source_code: string }>(`/submissions/${id}/source`).then(r => r.data),
 }
 
 // ─── User API (公开主页: 所有记录公开) ────────────────────────────────────────

@@ -103,6 +103,42 @@
         </el-table>
       </el-card>
 
+      <!-- ── Source code (author / admin only) ── -->
+      <el-card v-if="canViewSource" shadow="never" class="code-card">
+        <template #header>
+          <div class="code-head">
+            <span class="code-title">
+              <el-icon><Document /></el-icon> 源代码
+              <el-tag size="small" effect="plain" class="code-lang">{{ sub.language }}</el-tag>
+            </span>
+            <el-button
+              v-if="sourceCode"
+              link
+              size="small"
+              :icon="CopyDocument"
+              @click="copyCode"
+            >复制</el-button>
+          </div>
+        </template>
+
+        <div v-if="sourceLoading" class="code-loading">
+          <el-icon class="is-loading"><Loading /></el-icon> 加载中…
+        </div>
+        <div v-else-if="sourceError" class="code-error">
+          <el-icon><WarningFilled /></el-icon> {{ sourceError }}
+          <el-button link type="primary" size="small" @click="loadSource">重试</el-button>
+        </div>
+        <CodeEditor
+          v-else
+          :model-value="sourceCode"
+          :language="sub.language"
+          read-only
+          :show-toolbar="false"
+          :show-hint="false"
+          height="460px"
+        />
+      </el-card>
+
       <!-- Polling indicator -->
       <div v-if="!isTerminal" class="polling-row">
         <el-icon class="is-loading poll-spin"><Loading /></el-icon>
@@ -124,17 +160,58 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import {
   Document, Timer, Loading,
-  CircleCheck, CircleClose, WarningFilled, InfoFilled, List,
+  CircleCheck, CircleClose, WarningFilled, InfoFilled, List, CopyDocument,
 } from '@element-plus/icons-vue'
 import { submissionApi } from '@/api/http'
+import { useAuthStore } from '@/stores/auth'
+import CodeEditor from '@/components/CodeEditor.vue'
 import { TERMINAL_STATUSES } from '@/types'
 import type { Submission } from '@/types'
 
 const route   = useRoute()
+const auth    = useAuthStore()
 const sub     = ref<Submission | null>(null)
 const loading = ref(true)
+
+// ── Source code (lazy-loaded; private to author/admin) ──────────────────────
+const sourceCode    = ref('')
+const sourceLoading = ref(false)
+const sourceError   = ref('')
+let   sourceFetched = false
+
+// Only the submission's author or an admin may read the source code; the backend
+// enforces this, so we hide the card entirely for anyone else.
+const canViewSource = computed(() =>
+  !!sub.value && (auth.isAdmin || auth.user?.id === sub.value.user_id)
+)
+
+async function loadSource() {
+  if (sourceFetched || !sub.value) return
+  sourceFetched = true
+  sourceLoading.value = true
+  sourceError.value = ''
+  try {
+    const res = await submissionApi.getSource(sub.value.id)
+    sourceCode.value = res.source_code
+  } catch {
+    sourceError.value = '源代码加载失败'
+    sourceFetched = false // allow retry
+  } finally {
+    sourceLoading.value = false
+  }
+}
+
+async function copyCode() {
+  try {
+    await navigator.clipboard.writeText(sourceCode.value)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
 let   timer: ReturnType<typeof setInterval> | null = null
 let   pollCount = 0
 const MAX_POLL  = 60
@@ -150,6 +227,8 @@ async function fetchSub() {
   try {
     sub.value = await submissionApi.get(Number(route.params.id))
     pollCount++
+    // Pull the source once the submission is loaded, if the viewer may see it.
+    if (canViewSource.value) loadSource()
     if (isTerminal.value && timer) {
       clearInterval(timer)
       timer = null
@@ -260,6 +339,32 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 .tc-summary { font-size: 13px; color: var(--oj-text-3); }
 .ac-count   { color: var(--oj-success); }
 .tle-val    { color: var(--oj-danger); font-weight: 600; }
+
+/* ── Source code ── */
+.code-card { margin-bottom: 16px; }
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.code-title {
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.code-lang { margin-left: 4px; }
+.code-loading,
+.code-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--oj-text-3);
+  font-size: 14px;
+}
+.code-error { color: var(--oj-danger); }
 
 /* ── Polling ── */
 .polling-row {
