@@ -219,7 +219,7 @@ func (h *UserHandler) bindEmail(c *gin.Context, uid models.ID, email string) boo
 
 type changePasswordReq struct {
 	OldPassword string `json:"old_password" binding:"required"`
-	NewPassword string `json:"new_password" binding:"required,min=6"`
+	NewPassword string `json:"new_password" binding:"required,min=6,max=72"`
 }
 
 // ChangePassword lets the authenticated user change their own password after
@@ -243,7 +243,7 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	}
 	// 400 (not 401) on a wrong current password so the client doesn't treat it
 	// as an expired session and bounce the user to the login page.
-	if !checkPassword(req.OldPassword, u.PasswordHash) {
+	if ok, _ := checkPassword(req.OldPassword, u.PasswordHash); !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "当前密码不正确"})
 		return
 	}

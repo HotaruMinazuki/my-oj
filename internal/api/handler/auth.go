@@ -16,6 +16,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/your-org/my-oj/internal/api/middleware"
 	appmail "github.com/your-org/my-oj/internal/mail"
@@ -71,7 +72,7 @@ type registerReq struct {
 	// Email is optional. When omitted the account starts unbound and can bind
 	// one later from the profile page.
 	Email        string `json:"email"        binding:"omitempty,email"`
-	Password     string `json:"password"     binding:"required,min=6"`
+	Password     string `json:"password"     binding:"required,min=6,max=72"`
 	Organization string `json:"organization"`
 }
 
@@ -170,9 +171,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "不存在该用户"})
 		return
 	}
-	if !checkPassword(req.Password, u.PasswordHash) {
+	ok, needsRehash := checkPassword(req.Password, u.PasswordHash)
+	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "密码错误"})
 		return
+	}
+	// 老格式登录成功后透明升级为 bcrypt；失败只记日志，不阻断登录。
+	if needsRehash {
+		if nh, err := hashPassword(req.Password); err == nil {
+			if err := h.users.UpdatePassword(c.Request.Context(), u.ID, nh); err != nil {
+				h.log.Warn("rehash on login: update password", zap.Error(err), zap.Int64("user_id", int64(u.ID)))
+			}
+		}
 	}
 
 	token, err := h.issueToken(u)
@@ -278,7 +288,7 @@ func (h *AuthHandler) RequestPasswordReset(c *gin.Context) {
 type resetConfirmReq struct {
 	Identifier  string `json:"identifier"   binding:"required"`
 	Code        string `json:"code"         binding:"required"`
-	NewPassword string `json:"new_password" binding:"required,min=6"`
+	NewPassword string `json:"new_password" binding:"required,min=6,max=72"`
 }
 
 // ConfirmPasswordReset verifies the code and sets the new password.
@@ -400,22 +410,30 @@ func validEmail(s string) bool {
 	return err == nil
 }
 
-// hashPassword returns "hex(sha256(salt||password)):hex(salt)".
-// Uses crypto/rand for the salt.
+// bcryptCost is the bcrypt work factor for new password hashes.
+const bcryptCost = 12
+
+// hashPassword returns a bcrypt hash of the password (新格式，$2b$ 开头).
 func hashPassword(password string) (string, error) {
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
+	b, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	if err != nil {
 		return "", err
 	}
-	h := sha256.New()
-	h.Write(salt)
-	h.Write([]byte(password))
-	sum := h.Sum(nil)
-	return hex.EncodeToString(sum) + ":" + hex.EncodeToString(salt), nil
+	return string(b), nil
 }
 
 // checkPassword verifies a plaintext password against a stored hash.
-func checkPassword(password, stored string) bool {
+// 兼容老格式 hex(sha256(salt||pw)):hex(salt) 与新格式 bcrypt。
+// needsRehash=true 表示校验通过但仍是老格式，调用方应升级。
+func checkPassword(password, stored string) (ok bool, needsRehash bool) {
+	if strings.HasPrefix(stored, "$2") {
+		return bcrypt.CompareHashAndPassword([]byte(stored), []byte(password)) == nil, false
+	}
+	return legacyCheck(password, stored), true
+}
+
+// legacyCheck verifies a password against the old salted SHA-256 format.
+func legacyCheck(password, stored string) bool {
 	parts := strings.SplitN(stored, ":", 2)
 	if len(parts) != 2 {
 		return false
@@ -427,6 +445,5 @@ func checkPassword(password, stored string) bool {
 	h := sha256.New()
 	h.Write(salt)
 	h.Write([]byte(password))
-	computed := hex.EncodeToString(h.Sum(nil))
-	return computed == parts[0]
+	return hex.EncodeToString(h.Sum(nil)) == parts[0]
 }
