@@ -23,20 +23,30 @@
 该文件包含：
 
 - `<info>`：比赛标题、总时长、封榜时长（由封榜时间推导）、罚时（penalty_minutes）、开始时间
+- `<judgement>`：判定类型定义（AC/WA/TLE/MLE/RTE/CE）。**必须有**，否则 Resolver 无法把
+  `<run>` 的结果识别为已判，会报 "unjudged submissions" 并拒绝滚榜
 - `<problem>`：每道题的题号（A/B/C…）与标题
 - `<team>`：每个参赛者（已报名者 + 有提交者）的 id / 队名 / 学校
 - `<run>`：每次已判定提交（AC/WA/TLE/MLE/RTE/CE），含相对时间、是否通过、是否计罚时
 
 > 仅导出最终判定状态的提交；Pending/评测中/SystemError 不计入。比赛结束后的提交不计入。
 
-## 3. 运行滚榜工具
+## 3. 运行环境：Java 17+
 
-将下载的 XML 放到 `滚榜/` 目录，然后：
+ICPC Resolver 2.6 需要 **Java 17 或更高**（Java 8 会报 `UnsupportedClassVersionError`）。
+本仓库的 `滚榜/awards.bat`、`滚榜/resolver.bat` 已写死使用本机的 Temurin JDK 17
+（`set JAVA=...`）。换机器时若 Java 装在别处，改这两个脚本顶部的 `JAVA` 路径即可。
 
-**Windows**
-```bat
+## 4. 运行滚榜工具
+
+将下载的 XML 放到 `滚榜/` 目录。有两种用法：
+
+### 直接滚榜（不发奖）
+
+**Windows**（PowerShell 里注意 `.\` 前缀）
+```powershell
 cd 滚榜
-resolver.bat contest-1-event-feed.xml
+.\resolver.bat contest-1-event-feed.xml
 ```
 
 **Linux / macOS**
@@ -45,8 +55,41 @@ cd 滚榜
 ./resolver.sh contest-1-event-feed.xml
 ```
 
-奖牌数量（金/银/铜）等参数按工具自带说明（`滚榜/README.pdf`）或
-参考 https://blog.csdn.net/xzx18822942899/article/details/128275137 配置。
+### 先发奖再滚榜（推荐：金银铜奖牌 + 名次）
+
+第一步用 `awards.bat` 给比赛分配奖项，它会读取 XML 并输出一个带奖项的
+`*-awards.ndjson`（JSON 事件流）：
+
+```powershell
+cd 滚榜
+.\awards.bat contest-1-event-feed.xml --medals 1 1 1 --rank 10
+```
+
+- `--medals <金> <银> <铜>`：奖牌数量
+- `--rank <N>`：给前 N 名分配名次奖（"1st place"…）
+- `--fts <封榜前> <封榜后>`：一血奖（first-to-solve）
+- 更多参数见 `.\awards.bat --help`
+
+第二步把生成的 ndjson 喂给 resolver 滚榜：
+
+```powershell
+.\resolver.bat contest-1-event-feed-awards.ndjson
+```
+
+> 奖牌等参数也可参考 `滚榜/README.pdf` 或
+> https://blog.csdn.net/xzx18822942899/article/details/128275137 。
+
+### 滚榜界面操作
+
+| 按键 | 作用 |
+|------|------|
+| 空格 / 鼠标点击 | 推进一步，揭晓下一个 |
+| `p` | 暂停 / 继续 |
+| `+` / `-` | 加速 / 减速 |
+| `j` | 恢复默认速度 |
+| `r` / `1` / `2` | 回退 / 快退一步 / 快进一步 |
+| `0` | 跳回开头 |
+| `Ctrl-Q` | 退出 |
 
 ## 注意
 

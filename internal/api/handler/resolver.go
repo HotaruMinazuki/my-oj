@@ -92,11 +92,34 @@ func (h *ResolverHandler) ExportEventFeed(c *gin.Context) {
 // ─── XML model (CCS event feed) ───────────────────────────────────────────────
 
 type xmlContest struct {
-	XMLName  xml.Name     `xml:"contest"`
-	Info     xmlInfo      `xml:"info"`
-	Problems []xmlProblem `xml:"problem"`
-	Teams    []xmlTeam    `xml:"team"`
-	Runs     []xmlRun     `xml:"run"`
+	XMLName    xml.Name           `xml:"contest"`
+	Info       xmlInfo            `xml:"info"`
+	Judgements []xmlJudgementType `xml:"judgement"`
+	Problems   []xmlProblem       `xml:"problem"`
+	Teams      []xmlTeam          `xml:"team"`
+	Runs       []xmlRun           `xml:"run"`
+}
+
+// xmlJudgementType is a top-level <judgement> verdict definition. The Resolver's
+// XMLFeedParser maps each <run>'s <result> acronym to a judgement type by id
+// (= acronym). Without these definitions getJudgementTypeById returns nil, so
+// every run is treated as "unjudged" and awards.bat/Resolver refuse to run.
+// Keep the set in sync with mapResult.
+type xmlJudgementType struct {
+	Acronym string `xml:"acronym"`
+	Name    string `xml:"name"`
+	Solved  bool   `xml:"solved"`
+	Penalty bool   `xml:"penalty"`
+}
+
+// standardJudgementTypes are emitted for every contest so result acronyms resolve.
+var standardJudgementTypes = []xmlJudgementType{
+	{Acronym: "AC", Name: "Accepted", Solved: true, Penalty: false},
+	{Acronym: "WA", Name: "Wrong Answer", Solved: false, Penalty: true},
+	{Acronym: "TLE", Name: "Time Limit Exceeded", Solved: false, Penalty: true},
+	{Acronym: "MLE", Name: "Memory Limit Exceeded", Solved: false, Penalty: true},
+	{Acronym: "RTE", Name: "Run-Time Error", Solved: false, Penalty: true},
+	{Acronym: "CE", Name: "Compile Error", Solved: false, Penalty: false},
 }
 
 type xmlInfo struct {
@@ -159,7 +182,7 @@ func buildEventFeed(
 		info.FreezeLength = hms(contest.EndTime.Sub(*contest.FreezeTime).Seconds())
 	}
 
-	feed := &xmlContest{Info: info}
+	feed := &xmlContest{Info: info, Judgements: standardJudgementTypes}
 
 	for _, p := range problems {
 		feed.Problems = append(feed.Problems, xmlProblem{
