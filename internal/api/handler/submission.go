@@ -25,6 +25,10 @@ type SubmissionRepo interface {
 	Create(ctx context.Context, s *models.Submission) error
 	GetByID(ctx context.Context, id models.ID) (*models.Submission, error)
 	Update(ctx context.Context, s *models.Submission) error
+	// ListPendingByContest returns the contest's still-Pending submissions with the
+	// fields needed to rebuild a JudgeTask, for the deferred batch evaluation of
+	// 盲考 (OI 挂机模式) contests.
+	ListPendingByContest(ctx context.Context, contestID models.ID) ([]*models.Submission, error)
 }
 
 // ProblemRepo is the subset of problem queries needed for submission validation.
@@ -133,7 +137,15 @@ func (h *SubmissionHandler) Submit(c *gin.Context) {
 		return
 	}
 
-	h.enqueueTask(c, ctx, sub, userID, &contestID, cfg, meta, testCases, sourceKey)
+	// 盲考/挂机模式: a running OI contest withholds the submission from the judge
+	// until an admin runs the post-contest batch evaluation. It is persisted as
+	// Pending and the contestant sees only "Pending".
+	if h.deferJudging(ctx, &contestID) {
+		c.JSON(http.StatusCreated, gin.H{"id": sub.ID, "status": sub.Status, "deferred": true})
+		return
+	}
+
+	h.enqueueTask(c, ctx, sub, cfg, meta, testCases)
 }
 
 // ─── POST /api/v1/submissions (out-of-contest practice) ──────────────────────
@@ -188,7 +200,92 @@ func (h *SubmissionHandler) SubmitPractice(c *gin.Context) {
 		return
 	}
 
-	h.enqueueTask(c, ctx, sub, userID, contestID, cfg, meta, testCases, sourceKey)
+	// If this submission was auto-attributed to a running 盲考 (OI) contest, hold
+	// it back from the judge just like a contest-page submission would be.
+	if h.deferJudging(ctx, contestID) {
+		c.JSON(http.StatusCreated, gin.H{"id": sub.ID, "status": sub.Status, "deferred": true})
+		return
+	}
+
+	h.enqueueTask(c, ctx, sub, cfg, meta, testCases)
+}
+
+// ─── POST /api/v1/admin/contests/:contest_id/judge (admin 赛后评测) ────────────
+
+// JudgeContest runs the deferred batch evaluation for a 盲考 (挂机模式) contest:
+// every withheld (Pending) submission is enqueued for judging in one sweep. Only
+// valid after the contest has ended — results then stream onto the scoreboard via
+// the normal judge-result pipeline, which is the moment scores become public.
+func (h *SubmissionHandler) JudgeContest(c *gin.Context) {
+	contestID, ok := parseContestID(c)
+	if !ok {
+		return
+	}
+	ctx := c.Request.Context()
+
+	contest, err := h.contests.GetByID(ctx, contestID)
+	if err != nil || contest == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "contest not found"})
+		return
+	}
+	if contest.EffectiveStatus(time.Now().UTC()) != models.ContestStatusEnded {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "比赛尚未结束，无法运行赛后评测"})
+		return
+	}
+
+	pending, err := h.submissions.ListPendingByContest(ctx, contestID)
+	if err != nil {
+		h.log.Error("list pending submissions", zap.Error(err), zap.Int64("contest_id", contestID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		return
+	}
+
+	// Cache each problem's judge meta so it is loaded once, not per submission.
+	type problemMeta struct {
+		cfg       *models.JudgeConfig
+		meta      *models.ProblemJudgeMeta
+		testCases []models.JudgeTestCase
+		usable    bool
+	}
+	metaCache := make(map[models.ID]problemMeta)
+
+	enqueued, skipped := 0, 0
+	for _, sub := range pending {
+		pm, cached := metaCache[sub.ProblemID]
+		if !cached {
+			cfg, meta, testCases, err := h.loadProblemMetaCtx(ctx, sub.ProblemID)
+			pm = problemMeta{cfg: cfg, meta: meta, testCases: testCases, usable: err == nil && len(testCases) > 0}
+			if err != nil {
+				h.log.Warn("batch judge: load problem meta failed",
+					zap.Int64("problem_id", sub.ProblemID), zap.Error(err))
+			} else if len(testCases) == 0 {
+				h.log.Warn("batch judge: problem has no test data; skipping its submissions",
+					zap.Int64("problem_id", sub.ProblemID))
+			}
+			metaCache[sub.ProblemID] = pm
+		}
+		if !pm.usable {
+			skipped++
+			continue
+		}
+		if err := h.publishJudgeTask(ctx, sub, pm.cfg, pm.meta, pm.testCases); err != nil {
+			h.log.Error("batch judge: enqueue failed",
+				zap.Int64("submission_id", sub.ID), zap.Error(err))
+			skipped++
+			continue
+		}
+		enqueued++
+	}
+
+	h.log.Info("batch judge dispatched",
+		zap.Int64("contest_id", contestID),
+		zap.Int("enqueued", enqueued), zap.Int("skipped", skipped), zap.Int("total", len(pending)))
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "已派发赛后评测",
+		"enqueued": enqueued,
+		"skipped":  skipped,
+		"total":    len(pending),
+	})
 }
 
 // ─── GET /api/v1/submissions/:id ─────────────────────────────────────────────
@@ -216,11 +313,17 @@ func (h *SubmissionHandler) GetSubmission(c *gin.Context) {
 	c.JSON(http.StatusOK, sub)
 }
 
-// applyContestVisibility strips per-testcase information from submissions in
-// ICPC-format contests for non-admin viewers. Both the testcase breakdown and
-// the judge message (which carries checker expected/got output) count as
-// testcase information; the compile log stays — it is standard ICPC feedback
-// for the contestant's own CE.
+// applyContestVisibility enforces format-specific result visibility for non-admin
+// viewers of a contest submission:
+//
+//   - 盲考 (OI) while the contest is still running → the contestant sees ONLY
+//     "Pending": every judged field is stripped (verdict, score, resource usage,
+//     compile log, testcases). This holds even for a submission that was somehow
+//     judged early — defense in depth alongside 挂机模式's deferred judging.
+//   - ICPC → the per-testcase breakdown and judge message stay hidden (standard
+//     for the format); the compile log stays for the contestant's own CE.
+//
+// Once a contest has ended, full results are shown to everyone.
 func (h *SubmissionHandler) applyContestVisibility(c *gin.Context, sub *models.Submission) {
 	if sub.ContestID == nil {
 		return // practice submission — full details
@@ -239,10 +342,46 @@ func (h *SubmissionHandler) applyContestVisibility(c *gin.Context, sub *models.S
 		sub.JudgeMessage = ""
 		return
 	}
+
+	if contest.IsBlindJudged() && contest.EffectiveStatus(time.Now().UTC()) != models.ContestStatusEnded {
+		maskBlind(sub)
+		return
+	}
 	if contest.ContestType == models.ContestICPC {
 		sub.TestCaseResults = nil
 		sub.JudgeMessage = ""
 	}
+}
+
+// maskBlind reduces a submission to a bare "Pending", clearing every field that
+// could leak a verdict or score during a 盲考 contest.
+func maskBlind(sub *models.Submission) {
+	sub.Status = models.StatusPending
+	sub.Score = 0
+	sub.TimeUsedMs = 0
+	sub.MemUsedKB = 0
+	sub.CompileLog = ""
+	sub.JudgeMessage = ""
+	sub.TestCaseResults = nil
+}
+
+// deferJudging reports whether a submission to this contest must be withheld from
+// the judge for now — true for a 盲考 (OI) contest that has not yet ended. A nil
+// contestID (plain practice) is never deferred.
+func (h *SubmissionHandler) deferJudging(ctx context.Context, contestID *models.ID) bool {
+	if contestID == nil {
+		return false
+	}
+	contest, err := h.contests.GetByID(ctx, *contestID)
+	if err != nil || contest == nil {
+		// Can't classify the contest — judge normally. GetSubmission still masks
+		// blind-contest results defensively, so a misclassification here can't leak.
+		h.log.Warn("defer-judging: resolve contest failed",
+			zap.Int64("contest_id", *contestID), zap.Error(err))
+		return false
+	}
+	return contest.IsBlindJudged() &&
+		contest.EffectiveStatus(time.Now().UTC()) != models.ContestStatusEnded
 }
 
 // ─── shared helpers ───────────────────────────────────────────────────────────
@@ -252,22 +391,10 @@ func (h *SubmissionHandler) loadProblemMeta(
 	ctx context.Context,
 	problemID models.ID,
 ) (*models.JudgeConfig, *models.ProblemJudgeMeta, []models.JudgeTestCase, bool) {
-	cfg, err := h.problems.GetJudgeConfig(ctx, problemID)
+	cfg, meta, testCases, err := h.loadProblemMetaCtx(ctx, problemID)
 	if err != nil {
-		h.log.Error("get judge config", zap.Error(err), zap.Int64("problem_id", problemID))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load problem config"})
-		return nil, nil, nil, false
-	}
-	meta, err := h.problems.GetJudgeMeta(ctx, problemID)
-	if err != nil {
-		h.log.Error("get judge meta", zap.Error(err), zap.Int64("problem_id", problemID))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load problem metadata"})
-		return nil, nil, nil, false
-	}
-	testCases, err := h.problems.GetTestCases(ctx, problemID)
-	if err != nil {
-		h.log.Error("get test cases", zap.Error(err), zap.Int64("problem_id", problemID))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load test cases"})
+		h.log.Error("load problem meta", zap.Error(err), zap.Int64("problem_id", problemID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load problem data"})
 		return nil, nil, nil, false
 	}
 	// A task with zero test cases would be judged as SystemError; fail fast with
@@ -279,6 +406,28 @@ func (h *SubmissionHandler) loadProblemMeta(
 		return nil, nil, nil, false
 	}
 	return cfg, meta, testCases, true
+}
+
+// loadProblemMetaCtx loads a problem's judge config, metadata and test cases
+// without writing any HTTP response. Shared by the live submit path (wrapped by
+// loadProblemMeta) and the deferred batch evaluation.
+func (h *SubmissionHandler) loadProblemMetaCtx(
+	ctx context.Context,
+	problemID models.ID,
+) (*models.JudgeConfig, *models.ProblemJudgeMeta, []models.JudgeTestCase, error) {
+	cfg, err := h.problems.GetJudgeConfig(ctx, problemID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("get judge config: %w", err)
+	}
+	meta, err := h.problems.GetJudgeMeta(ctx, problemID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("get judge meta: %w", err)
+	}
+	testCases, err := h.problems.GetTestCases(ctx, problemID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("get test cases: %w", err)
+	}
+	return cfg, meta, testCases, nil
 }
 
 // uploadSource uploads the source code to MinIO and returns the object key.
@@ -308,29 +457,53 @@ func (h *SubmissionHandler) uploadSource(
 	return key, true
 }
 
-// enqueueTask builds and publishes a JudgeTask to the MQ.
-// On MQ failure the submission is still created; a background requeue job can
-// resend stale Pending submissions.
+// enqueueTask publishes a JudgeTask for a freshly created submission and writes
+// the HTTP ack. On MQ failure the submission is still created; a background
+// requeue job can resend stale Pending submissions.
 func (h *SubmissionHandler) enqueueTask(
 	c *gin.Context,
 	ctx context.Context,
 	sub *models.Submission,
-	userID models.ID,
-	contestID *models.ID,
 	cfg *models.JudgeConfig,
 	meta *models.ProblemJudgeMeta,
 	testCases []models.JudgeTestCase,
-	sourceKey string,
 ) {
+	if err := h.publishJudgeTask(ctx, sub, cfg, meta, testCases); err != nil {
+		h.log.Error("enqueue judge task", zap.Error(err), zap.Int64("submission_id", sub.ID))
+		c.JSON(http.StatusAccepted, gin.H{
+			"id":      sub.ID,
+			"status":  sub.Status,
+			"warning": "enqueue failed; submission recorded and will be retried",
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"id":     sub.ID,
+		"status": sub.Status,
+	})
+}
+
+// publishJudgeTask builds a JudgeTask from a submission and publishes it to the
+// judge queue. Pure (no HTTP); shared by the live submit path and the deferred
+// batch evaluation. The submission must carry UserID, ProblemID, ContestID,
+// Language and SourceCodePath (the MinIO key the judger downloads).
+func (h *SubmissionHandler) publishJudgeTask(
+	ctx context.Context,
+	sub *models.Submission,
+	cfg *models.JudgeConfig,
+	meta *models.ProblemJudgeMeta,
+	testCases []models.JudgeTestCase,
+) error {
 	task := &mq.TaskMessage{
 		JudgeTask: models.JudgeTask{
 			TaskID:         uuid.New().String(),
 			SubmissionID:   sub.ID,
-			UserID:         userID,
+			UserID:         sub.UserID,
 			ProblemID:      sub.ProblemID,
-			ContestID:      contestID,
+			ContestID:      sub.ContestID,
 			Language:       sub.Language,
-			SourceCodePath: sourceKey, // MinIO key; judger downloads via ObjectStore
+			SourceCodePath: sub.SourceCodePath,
 			JudgeType:      meta.JudgeType,
 			JudgeConfig:    *cfg,
 			TimeLimitMs:    meta.TimeLimitMs,
@@ -341,20 +514,8 @@ func (h *SubmissionHandler) enqueueTask(
 	}
 
 	payload, _ := mq.MarshalTask(task)
-	if _, err := h.publisher.Publish(ctx, mq.QueueJudgeTasks, payload); err != nil {
-		h.log.Error("enqueue judge task", zap.Error(err), zap.Int64("submission_id", sub.ID))
-		c.JSON(http.StatusAccepted, gin.H{
-			"id":            sub.ID,
-			"status":        sub.Status,
-			"warning":       "enqueue failed; submission recorded and will be retried",
-		})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"id":            sub.ID,
-		"status":        sub.Status,
-	})
+	_, err := h.publisher.Publish(ctx, mq.QueueJudgeTasks, payload)
+	return err
 }
 
 func langExt(lang models.Language) string {

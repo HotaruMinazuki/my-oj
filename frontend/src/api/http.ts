@@ -195,6 +195,12 @@ export const adminApi = {
   revealContest: (contestId: number) =>
     http.post(`/admin/contests/${contestId}/reveal`).then(r => r.data),
 
+  // 赛后评测 (OI 挂机模式): batch-judge every withheld submission once the contest
+  // has ended. Results then stream onto the scoreboard.
+  judgeContest: (contestId: number) =>
+    http.post<{ message: string; enqueued: number; skipped: number; total: number }>(
+      `/admin/contests/${contestId}/judge`).then(r => r.data),
+
   // Download the resolver (滚榜) event-feed XML for a contest. Uses the axios
   // instance so the admin JWT is attached, then triggers a browser download.
   exportResolverXml: async (contestId: number) => {

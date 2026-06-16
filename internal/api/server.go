@@ -186,6 +186,9 @@ func NewServer(
 
 			// 解榜: reveal frozen scoreboard after the contest ends
 			admin.POST("/contests/:contest_id/reveal", adminH.RevealContest)
+
+			// 赛后评测: run the deferred batch judging of a 盲考 (OI 挂机模式) contest
+			admin.POST("/contests/:contest_id/judge", submissionH.JudgeContest)
 		}
 	}
 

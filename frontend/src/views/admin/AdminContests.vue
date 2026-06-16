@@ -32,6 +32,15 @@
               滚榜XML
             </el-button>
             <el-button
+              v-if="row.status === 'ended' && row.contest_type === 'OI'"
+              size="small"
+              type="success"
+              :loading="judgingId === row.id"
+              @click="judge(row)"
+            >
+              赛后评测
+            </el-button>
+            <el-button
               v-if="row.status === 'ended'"
               size="small"
               type="warning"
@@ -325,6 +334,28 @@ async function reveal(row: Contest) {
     ElMessage.error('解榜失败')
   } finally {
     revealingId.value = null
+  }
+}
+
+// ─── 赛后评测 (OI 挂机模式 deferred batch judging) ───────────────────────────
+const judgingId = ref<number | null>(null)
+async function judge(row: Contest) {
+  try {
+    await ElMessageBox.confirm(
+      `确认对「${row.title}」运行赛后评测？系统将批量评测本场所有“挂机”提交，成绩与排行榜随后公开。提交较多时需要一些时间。`,
+      '确认赛后评测',
+      { type: 'warning', confirmButtonText: '开始评测', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  judgingId.value = row.id
+  try {
+    const res = await adminApi.judgeContest(row.id)
+    ElMessage.success(`已派发评测：${res.enqueued} 份提交` + (res.skipped ? `（跳过 ${res.skipped}）` : ''))
+  } catch {
+    ElMessage.error('赛后评测派发失败')
+  } finally {
+    judgingId.value = null
   }
 }
 

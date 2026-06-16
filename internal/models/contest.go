@@ -78,6 +78,16 @@ func (c *Contest) EffectiveStatus(now time.Time) ContestStatus {
 	}
 }
 
+// IsBlindJudged reports whether the contest withholds ALL judging feedback from
+// contestants until it ends — the OI "盲考"/挂机模式. While the contest runs,
+// submissions are stored but never sent to the judge; contestants see only
+// "Pending", never a verdict, score, or test-case detail. After the contest
+// ends an admin runs the deferred batch evaluation (赛后评测), at which point the
+// results and the scoreboard become visible.
+func (c *Contest) IsBlindJudged() bool {
+	return c.ContestType == ContestOI
+}
+
 // ContestProblem links a Problem to a Contest with contest-specific overrides.
 type ContestProblem struct {
 	ContestID ID `db:"contest_id" json:"contest_id"`

@@ -246,6 +246,43 @@ ORDER  BY created_at, id`
 	return out, rows.Err()
 }
 
+// ListPendingByContest returns the contest's still-unjudged (Pending) submissions
+// with just the columns needed to (re)build a JudgeTask: id, user, problem,
+// contest, language and the MinIO source key. It drives the deferred batch
+// evaluation (赛后评测) of 盲考 contests, whose submissions are withheld from the
+// judge until the contest ends.
+func (r *SubmissionRepo) ListPendingByContest(ctx context.Context, contestID models.ID) ([]*models.Submission, error) {
+	const q = `
+SELECT id, user_id, problem_id, contest_id, language, source_code_path, status
+FROM   submissions
+WHERE  contest_id = $1 AND status = $2
+ORDER  BY id`
+
+	rows, err := r.db.QueryContext(ctx, q, contestID, string(models.StatusPending))
+	if err != nil {
+		return nil, fmt.Errorf("list pending submissions for contest %d: %w", contestID, err)
+	}
+	defer rows.Close()
+
+	var out []*models.Submission
+	for rows.Next() {
+		var s models.Submission
+		var contestID sql.NullInt64
+		if err := rows.Scan(
+			&s.ID, &s.UserID, &s.ProblemID, &contestID,
+			&s.Language, &s.SourceCodePath, &s.Status,
+		); err != nil {
+			return nil, fmt.Errorf("scan pending submission: %w", err)
+		}
+		if contestID.Valid {
+			cid := models.ID(contestID.Int64)
+			s.ContestID = &cid
+		}
+		out = append(out, &s)
+	}
+	return out, rows.Err()
+}
+
 // UserSubmissionStats summarises one user's judging history for profile pages.
 type UserSubmissionStats struct {
 	Total    int `json:"total"`

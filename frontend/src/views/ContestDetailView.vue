@@ -58,6 +58,21 @@
         </div>
       </el-card>
 
+      <!-- ── 盲考 (OI) notice ── -->
+      <el-alert
+        v-if="isBlindActive"
+        type="warning"
+        :closable="false"
+        show-icon
+        class="blind-alert"
+        title="盲考模式（OI 赛制）"
+      >
+        <template #default>
+          比赛进行中<strong>不提供任何评测反馈</strong>：提交后仅显示「等待中」，看不到得分、对错或测试点详情。
+          比赛结束后由管理员统一评测，届时再公布成绩与排行榜。每题以你的提交为准计分，可多次提交。
+        </template>
+      </el-alert>
+
       <!-- ── Problem list ── -->
       <el-card shadow="never" class="problems-card">
         <template #header>
@@ -208,6 +223,16 @@ const notStarted = computed(() =>
   !!contest.value && contest.value.status === 'ready' && !auth.isAdmin
 )
 
+// 盲考 (OI 挂机模式): while the contest runs, contestants get no judging feedback.
+// Surface this prominently so a perpetual "Pending" is understood, not mistaken
+// for a stuck judge. Admins see real results, so don't show them the notice.
+const isBlindActive = computed(() =>
+  !!contest.value &&
+  contest.value.contest_type === 'OI' &&
+  contest.value.status !== 'ended' &&
+  !auth.isAdmin
+)
+
 const submitVisible = ref(false)
 const submitTarget  = ref<ContestProblemSummary | null>(null)
 const submitLang    = ref('C++17')
@@ -344,6 +369,10 @@ onMounted(() => { fetchContest(); fetchProblems() })
 .cd-val { font-variant-numeric: tabular-nums; letter-spacing: .5px; }
 
 .ch-actions { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; flex-shrink: 0; }
+
+/* ── 盲考 notice ── */
+.blind-alert { margin-bottom: 16px; }
+.blind-alert :deep(.el-alert__description) { line-height: 1.7; }
 
 /* ── Problem list ── */
 .problems-card { margin-bottom: 16px; }
