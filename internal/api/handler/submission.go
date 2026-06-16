@@ -51,6 +51,9 @@ type SubmissionContestRepo interface {
 	// should count toward — a running contest containing the problem that the
 	// user may submit to (public or registered) — or nil for plain practice.
 	ActiveContestForProblem(ctx context.Context, problemID, userID models.ID) (*models.ID, error)
+	// CanSubmitToContest reports whether the user may submit this problem to this
+	// contest right now (contest contains problem, is running, user is eligible).
+	CanSubmitToContest(ctx context.Context, contestID, problemID, userID models.ID) (bool, error)
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -114,6 +117,20 @@ func (h *SubmissionHandler) Submit(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+
+	allowed, err := h.contests.CanSubmitToContest(ctx, contestID, req.ProblemID, userID)
+	if err != nil {
+		h.log.Error("check submit eligibility", zap.Error(err),
+			zap.Int64("contest_id", contestID), zap.Int64("problem_id", req.ProblemID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if !allowed {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "无法向该比赛提交此题：比赛未在进行中、题目不属于该比赛，或你尚未报名",
+		})
+		return
+	}
 
 	cfg, meta, testCases, ok := h.loadProblemMeta(c, ctx, req.ProblemID)
 	if !ok {

@@ -33,6 +33,10 @@ type ContestCRUDRepo interface {
 	// ActiveContestForProblem resolves the running contest a problem submission
 	// should count toward (used to auto-attribute problem-page submissions).
 	ActiveContestForProblem(ctx context.Context, problemID, userID models.ID) (*models.ID, error)
+	// CanSubmitToContest reports whether the user may submit this problem to this
+	// contest right now (contest contains problem, is running, user is eligible).
+	// Declared here so the shared repo value also satisfies SubmissionContestRepo.
+	CanSubmitToContest(ctx context.Context, contestID, problemID, userID models.ID) (bool, error)
 }
 
 // ContestHandler serves contest list, detail, registration, and admin endpoints.

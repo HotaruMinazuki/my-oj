@@ -357,6 +357,33 @@ LIMIT 1`
 	return &id, nil
 }
 
+// CanSubmitToContest reports whether userID may submit problemID to contestID right
+// now: the contest contains the problem, is currently running (start ≤ now ≤ end,
+// 封榜期仍算进行中), and the user may submit (public contest, or a registered
+// participant). Mirrors ActiveContestForProblem but locks onto a specific contest.
+func (r *ContestRepo) CanSubmitToContest(ctx context.Context, contestID, problemID, userID models.ID) (bool, error) {
+	const q = `
+SELECT EXISTS (
+  SELECT 1
+  FROM   contest_problems cp
+  JOIN   contests c ON c.id = cp.contest_id
+  WHERE  cp.contest_id = $1
+    AND  cp.problem_id = $2
+    AND  c.start_time <= NOW() AND NOW() <= c.end_time
+    AND  (
+          c.is_public
+          OR EXISTS (
+               SELECT 1 FROM contest_participants p
+               WHERE p.contest_id = c.id AND p.user_id = $3)
+         )
+)`
+	var ok bool
+	if err := r.db.QueryRowContext(ctx, q, contestID, problemID, userID).Scan(&ok); err != nil {
+		return false, fmt.Errorf("check submit eligibility (contest %d, problem %d): %w", contestID, problemID, err)
+	}
+	return ok, nil
+}
+
 // ─── Register ─────────────────────────────────────────────────────────────────
 
 func (r *ContestRepo) Register(ctx context.Context, contestID, userID models.ID) error {
