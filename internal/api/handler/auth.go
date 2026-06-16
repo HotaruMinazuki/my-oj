@@ -166,8 +166,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
-	if u == nil || !checkPassword(req.Password, u.PasswordHash) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid username or password"})
+	if u == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "不存在该用户"})
+		return
+	}
+	if !checkPassword(req.Password, u.PasswordHash) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "密码错误"})
 		return
 	}
 

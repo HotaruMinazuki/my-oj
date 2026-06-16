@@ -65,6 +65,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { AxiosError } from 'axios'
 import { ElMessage } from 'element-plus'
 import type { FormInstance } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
@@ -91,6 +92,9 @@ async function handleLogin() {
     ElMessage.success('登录成功')
     const redirect = (route.query.redirect as string) || '/'
     router.push(redirect)
+  } catch (err) {
+    const msg = (err as AxiosError<{ error?: string }>)?.response?.data?.error || '登录失败，请稍后重试'
+    ElMessage.error(msg)
   } finally {
     loading.value = false
   }
