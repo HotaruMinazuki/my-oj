@@ -339,6 +339,8 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   padding: 6px 10px;
 }
 .markdown-body :deep(th) { background: var(--oj-bg); }
+/* 题面图片（外链）自适应宽度，避免超宽图把布局撑破 */
+.markdown-body :deep(img) { max-width: 100%; height: auto; }
 /* KaTeX 公式：块级公式过长时横向滚动；行内公式不要被 code 样式干扰 */
 .markdown-body :deep(.katex-display) { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
 .markdown-body :deep(.katex) { font-size: 1.05em; }
