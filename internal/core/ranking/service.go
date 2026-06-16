@@ -317,6 +317,7 @@ func (rs *RankingService) rebuildSnapshot(
 
 	snapshot := &BoardSnapshot{
 		ContestID:   contestID,
+		ContestType: meta.ContestType,
 		Frozen:      frozen,
 		Problems:    orderedLabels,
 		Contestants: contestants,

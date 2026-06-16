@@ -75,9 +75,12 @@ type BoardRow struct {
 
 // BoardSnapshot is the full board payload.
 type BoardSnapshot struct {
-	ContestID   models.ID  `json:"contest_id"`
-	Frozen      bool       `json:"frozen"`
-	Problems    []string   `json:"problems"` // ordered display labels
-	Contestants []BoardRow `json:"contestants"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ContestID models.ID `json:"contest_id"`
+	// ContestType drives client-side rendering: ICPC shows solved/penalty cells,
+	// while OI/IOI show per-problem and total scores only (no AC count, no penalty).
+	ContestType models.ContestType `json:"contest_type"`
+	Frozen      bool               `json:"frozen"`
+	Problems    []string           `json:"problems"` // ordered display labels
+	Contestants []BoardRow         `json:"contestants"`
+	UpdatedAt   time.Time          `json:"updated_at"`
 }

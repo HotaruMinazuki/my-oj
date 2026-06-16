@@ -19,9 +19,14 @@
         </el-tag>
       </div>
       <div class="board-legend">
-        <span class="legend-item legend-ac">AC</span>
-        <span class="legend-item legend-wa">WA</span>
-        <span class="legend-item legend-pending">?</span>
+        <template v-if="isScoreMode">
+          <span class="legend-item legend-score">得分</span>
+        </template>
+        <template v-else>
+          <span class="legend-item legend-ac">AC</span>
+          <span class="legend-item legend-wa">WA</span>
+          <span class="legend-item legend-pending">?</span>
+        </template>
       </div>
     </div>
 
@@ -69,7 +74,13 @@
         align="center"
       >
         <template #default="{ row }">
-          <div :class="['prob-cell', cellClass(row.problems?.[label])]">
+          <!-- OI/IOI: 只显示该题得分 -->
+          <div v-if="isScoreMode" :class="['prob-cell', scoreCellClass(row.problems?.[label])]">
+            <span v-if="row.problems?.[label]" class="score-val">{{ row.problems[label].score }}</span>
+            <span v-else class="empty-dash">·</span>
+          </div>
+          <!-- ICPC: AC / 罚时 / 待评 -->
+          <div v-else :class="['prob-cell', cellClass(row.problems?.[label])]">
             <template v-if="row.problems?.[label]?.solved">
               <!-- ICPC: 仅当有错误提交(罚时次数>0)才显示 +N，一发通过不显示 -->
               <div v-if="(row.problems[label].attempts ?? 0) > 0" class="cell-top">
@@ -90,13 +101,18 @@
         </template>
       </el-table-column>
 
-      <!-- 总计 -->
-      <el-table-column label="AC" prop="total_solved" width="64" align="center">
+      <!-- 总计: OI/IOI 只看总分; ICPC 看 AC 数 + 罚时 -->
+      <el-table-column v-if="isScoreMode" label="总分" prop="total_score" width="84" align="center">
+        <template #default="{ row }">
+          <span class="total-score">{{ row.total_score }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="!isScoreMode" label="AC" prop="total_solved" width="64" align="center">
         <template #default="{ row }">
           <span class="total-solved">{{ row.total_solved }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="罚时" prop="total_penalty" width="80" align="center">
+      <el-table-column v-if="!isScoreMode" label="罚时" prop="total_penalty" width="80" align="center">
         <template #default="{ row }">
           <span class="total-penalty">{{ row.total_penalty }}′</span>
         </template>
@@ -117,6 +133,7 @@ interface ProblemEntry {
   attempts: number
   pending: number
   penalty: number
+  score: number
 }
 interface Row {
   rank: number
@@ -126,6 +143,7 @@ interface Row {
   problems: Record<string, ProblemEntry>
   total_solved: number
   total_penalty: number
+  total_score: number
 }
 
 const auth = useAuthStore()
@@ -135,6 +153,9 @@ const rows          = ref<Row[]>([])
 const problemLabels = ref<string[]>([])
 const frozen        = ref(false)
 const loading       = ref(true)
+const contestType   = ref<string>('')
+// OI/IOI 排行榜只展示分数(每题得分 + 总分), 不显示 AC 数与罚时; ICPC 则相反。
+const isScoreMode   = computed(() => contestType.value === 'OI' || contestType.value === 'IOI')
 const wsStatus      = ref<'connecting' | 'open' | 'closed'>('connecting')
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -166,6 +187,7 @@ function applySnapshot(data: any) {
   rows.value          = data.contestants ?? []
   problemLabels.value = data.problems    ?? []
   frozen.value        = data.frozen      ?? false
+  contestType.value   = data.contest_type ?? ''
   loading.value       = false
 }
 
@@ -184,6 +206,12 @@ function cellClass(p?: ProblemEntry) {
   if (p.pending > 0)  return 'cell-pending'
   if (p.attempts > 0) return 'cell-wa'
   return ''
+}
+
+// OI/IOI: 有得分→绿, 提交过但 0 分→灰, 未提交→无底色。
+function scoreCellClass(p?: ProblemEntry) {
+  if (!p) return ''
+  return p.score > 0 ? 'cell-score' : 'cell-zero'
 }
 
 onMounted(connect)
@@ -222,6 +250,7 @@ onBeforeUnmount(() => {
 .legend-ac      { background: #d1f5d1; color: #1a7a1a; }
 .legend-wa      { background: #fde2e2; color: #c0392b; }
 .legend-pending { background: #fdf6ec; color: #b07d1a; }
+.legend-score   { background: #e6f0ff; color: #1d4ed8; }
 
 /* ── Loading ── */
 .board-loading { text-align: center; padding: 40px 0; color: var(--oj-text-3); display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; }
@@ -247,9 +276,15 @@ onBeforeUnmount(() => {
 .wa-icon   { font-size: 13px; font-weight: 700; }
 .empty-dash{ color: #d0d3d9; font-size: 18px; }
 
+/* ── Score cells (OI/IOI) ── */
+.cell-score { background: #e6f0ff; color: #1d4ed8; }
+.cell-zero  { background: #f2f3f5; color: var(--oj-text-3); }
+.score-val  { font-size: 14px; font-weight: 700; }
+
 /* ── Totals ── */
 .total-solved  { font-weight: 700; font-size: 15px; color: var(--oj-success); }
 .total-penalty { color: var(--oj-text-2); font-size: 13px; }
+.total-score   { font-weight: 800; font-size: 16px; color: var(--oj-primary); }
 
 /* ── Row highlights ── */
 :deep(.rank-gold td)   { background: #fffbe6 !important; }

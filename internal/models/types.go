@@ -49,6 +49,11 @@ const (
 	// StatusSE is returned when the judger itself encounters an internal failure;
 	// it signals the task should be retried on another node.
 	StatusSE SubmissionStatus = "SystemError"
+	// StatusSuperseded marks an OI submission that was overridden by a later
+	// submission to the same problem: under 盲考 rules only each problem's LAST
+	// submission is judged, so earlier ones are voided (never judged) but stay
+	// visible to the contestant after the contest.
+	StatusSuperseded SubmissionStatus = "Superseded"
 )
 
 // UserRole controls platform permissions.

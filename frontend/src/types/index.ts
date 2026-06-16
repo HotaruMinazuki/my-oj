@@ -75,10 +75,11 @@ export type SubmissionStatus =
   | 'Accepted' | 'WrongAnswer'
   | 'TimeLimitExceeded' | 'MemoryLimitExceeded'
   | 'RuntimeError' | 'CompileError' | 'SystemError'
+  | 'Superseded' // OI: overridden by a later submission to the same problem; not judged
 
 export const TERMINAL_STATUSES: SubmissionStatus[] = [
   'Accepted', 'WrongAnswer', 'TimeLimitExceeded', 'MemoryLimitExceeded',
-  'RuntimeError', 'CompileError', 'SystemError',
+  'RuntimeError', 'CompileError', 'SystemError', 'Superseded',
 ]
 
 export interface TestCaseResult {
@@ -151,6 +152,8 @@ export interface RankingProblemCell {
   attempts: number
   pending: number
   penalty: number
+  score: number        // OI/IOI: points earned on this problem
+  first_blood?: boolean
 }
 
 export interface RankingRow {
@@ -161,12 +164,15 @@ export interface RankingRow {
   problems: Record<string, RankingProblemCell>
   total_solved: number
   total_penalty: number
+  total_score: number  // OI/IOI: total points
 }
 
 export interface RankingSnapshot {
   contestants: RankingRow[]
   problems: string[]
   frozen: boolean
+  // contest_type drives rendering: ICPC → solved/penalty; OI/IOI → score-only.
+  contest_type?: ContestType
 }
 
 // ─── API envelopes ───────────────────────────────────────────────────────────
@@ -189,6 +195,7 @@ export type ElTagType = 'success' | 'warning' | 'info' | 'danger' | 'primary' | 
 export function statusTagType(s: SubmissionStatus): ElTagType {
   if (s === 'Accepted') return 'success'
   if (s === 'Pending' || s === 'Judging' || s === 'Compiling') return 'warning'
+  if (s === 'Superseded') return 'info'
   return 'danger'
 }
 

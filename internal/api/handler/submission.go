@@ -27,8 +27,12 @@ type SubmissionRepo interface {
 	Update(ctx context.Context, s *models.Submission) error
 	// ListPendingByContest returns the contest's still-Pending submissions with the
 	// fields needed to rebuild a JudgeTask, for the deferred batch evaluation of
-	// 盲考 (OI 挂机模式) contests.
+	// 盲考 (OI 挂机模式) contests. Ordered by id ascending, so the last entry per
+	// (user, problem) is that contestant's latest submission to the problem.
 	ListPendingByContest(ctx context.Context, contestID models.ID) ([]*models.Submission, error)
+	// MarkSuperseded flags submissions as Superseded — voided because a later
+	// submission to the same problem overrode them under OI last-submission rules.
+	MarkSuperseded(ctx context.Context, ids []models.ID) error
 }
 
 // ProblemRepo is the subset of problem queries needed for submission validation.
@@ -240,6 +244,27 @@ func (h *SubmissionHandler) JudgeContest(c *gin.Context) {
 		return
 	}
 
+	// OI 盲考: each problem counts ONLY the contestant's LAST submission. Judge just
+	// those; void the earlier ones (Superseded) so they stay visible but unscored.
+	toJudge := pending
+	superseded := 0
+	if contest.IsBlindJudged() {
+		var voided []*models.Submission
+		toJudge, voided = splitLatestPerProblem(pending)
+		superseded = len(voided)
+		if superseded > 0 {
+			voidedIDs := make([]models.ID, len(voided))
+			for i, s := range voided {
+				voidedIDs[i] = s.ID
+			}
+			if err := h.submissions.MarkSuperseded(ctx, voidedIDs); err != nil {
+				h.log.Error("mark superseded submissions", zap.Error(err), zap.Int64("contest_id", contestID))
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+				return
+			}
+		}
+	}
+
 	// Cache each problem's judge meta so it is loaded once, not per submission.
 	type problemMeta struct {
 		cfg       *models.JudgeConfig
@@ -250,7 +275,7 @@ func (h *SubmissionHandler) JudgeContest(c *gin.Context) {
 	metaCache := make(map[models.ID]problemMeta)
 
 	enqueued, skipped := 0, 0
-	for _, sub := range pending {
+	for _, sub := range toJudge {
 		pm, cached := metaCache[sub.ProblemID]
 		if !cached {
 			cfg, meta, testCases, err := h.loadProblemMetaCtx(ctx, sub.ProblemID)
@@ -279,13 +304,39 @@ func (h *SubmissionHandler) JudgeContest(c *gin.Context) {
 
 	h.log.Info("batch judge dispatched",
 		zap.Int64("contest_id", contestID),
-		zap.Int("enqueued", enqueued), zap.Int("skipped", skipped), zap.Int("total", len(pending)))
+		zap.Int("enqueued", enqueued), zap.Int("skipped", skipped),
+		zap.Int("superseded", superseded), zap.Int("total", len(pending)))
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "已派发赛后评测",
-		"enqueued": enqueued,
-		"skipped":  skipped,
-		"total":    len(pending),
+		"message":    "已派发赛后评测",
+		"enqueued":   enqueued,
+		"skipped":    skipped,
+		"superseded": superseded,
+		"total":      len(pending),
 	})
+}
+
+// splitLatestPerProblem partitions submissions into the latest one per
+// (user, problem) — the ones to judge — and all the earlier ones, which are
+// voided. "Latest" is the highest submission id for each (user, problem), so the
+// result is independent of input order. Order within each output slice follows
+// the input.
+func splitLatestPerProblem(subs []*models.Submission) (latest, voided []*models.Submission) {
+	type key struct{ user, problem models.ID }
+	latestID := make(map[key]models.ID, len(subs))
+	for _, s := range subs {
+		k := key{s.UserID, s.ProblemID}
+		if cur, ok := latestID[k]; !ok || s.ID > cur {
+			latestID[k] = s.ID // highest id = latest submission, regardless of input order
+		}
+	}
+	for _, s := range subs {
+		if latestID[key{s.UserID, s.ProblemID}] == s.ID {
+			latest = append(latest, s)
+		} else {
+			voided = append(voided, s)
+		}
+	}
+	return latest, voided
 }
 
 // ─── GET /api/v1/submissions/:id ─────────────────────────────────────────────

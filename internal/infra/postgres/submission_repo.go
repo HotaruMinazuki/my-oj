@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	"github.com/your-org/my-oj/internal/models"
 )
@@ -281,6 +282,30 @@ ORDER  BY id`
 		out = append(out, &s)
 	}
 	return out, rows.Err()
+}
+
+// MarkSuperseded sets the given submissions' status to Superseded — voided
+// because a later submission to the same problem overrode them under OI's
+// last-submission rule. The `status = Pending` guard keeps it idempotent and
+// avoids ever clobbering an already-judged submission. Bulk UPDATE in one trip.
+func (r *SubmissionRepo) MarkSuperseded(ctx context.Context, ids []models.ID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	raw := make([]int64, len(ids))
+	for i, id := range ids {
+		raw[i] = int64(id)
+	}
+	const q = `
+UPDATE submissions
+SET    status = $1, updated_at = NOW()
+WHERE  id = ANY($2) AND status = $3`
+	if _, err := r.db.ExecContext(ctx, q,
+		string(models.StatusSuperseded), pq.Array(raw), string(models.StatusPending),
+	); err != nil {
+		return fmt.Errorf("mark submissions superseded: %w", err)
+	}
+	return nil
 }
 
 // UserSubmissionStats summarises one user's judging history for profile pages.

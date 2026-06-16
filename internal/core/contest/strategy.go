@@ -121,6 +121,7 @@ func NewRegistry() *Registry {
 	r := &Registry{m: make(map[models.ContestType]Strategy)}
 	r.Register(&ICPCStrategy{})
 	r.Register(&OIStrategy{})
+	r.Register(&IOIStrategy{})
 	return r
 }
 
@@ -165,6 +166,17 @@ func (s *OIStrategy) Rank(entries []*ScoreEntry, _ ContestSettings) []RankRow {
 func (s *OIStrategy) IsFinalised(_ *ScoreEntry, _ ContestSettings) bool {
 	return false // OI: a later submission can always improve the score
 }
+
+// ─── IOI Strategy ─────────────────────────────────────────────────────────────
+
+// IOIStrategy scores by the best (maximum) score achieved per problem, ranking by
+// total score — exactly like OI's score model. The difference from OI is NOT in
+// scoring but in feedback: IOI is judged in real time with per-subtask feedback,
+// so it is NOT blind (see Contest.IsBlindJudged) and is not batch-judged. The
+// scoreboard, like OI's, shows only scores — no solved count, no penalty.
+type IOIStrategy struct{ OIStrategy }
+
+func (s *IOIStrategy) Name() models.ContestType { return models.ContestIOI }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 

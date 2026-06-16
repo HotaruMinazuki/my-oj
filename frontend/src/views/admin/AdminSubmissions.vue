@@ -104,7 +104,7 @@ const STATUS_CN: Record<string, string> = {
   Accepted: '通过', WrongAnswer: '答案错误',
   TimeLimitExceeded: '超时', MemoryLimitExceeded: '超内存',
   RuntimeError: '运行错误', CompileError: '编译错误',
-  SystemError: '系统错误', Pending: '等待中',
+  SystemError: '系统错误', Superseded: '已覆盖', Pending: '等待中',
   Judging: '评测中', Compiling: '编译中',
 }
 
@@ -135,6 +135,7 @@ function openSubmission(row: SubmissionListItem) {
 function statusTagType(s: string): '' | 'success' | 'warning' | 'info' | 'danger' {
   if (s === 'Accepted') return 'success'
   if (['Pending', 'Judging', 'Compiling'].includes(s)) return 'warning'
+  if (s === 'Superseded') return 'info'
   return 'danger'
 }
 
