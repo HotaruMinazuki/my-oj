@@ -9,6 +9,7 @@ declare module 'markdown-it' {
   interface MarkdownIt {
     render(src: string, env?: unknown): string
     renderInline(src: string, env?: unknown): string
+    use(plugin: (md: MarkdownIt, ...params: unknown[]) => void, ...params: unknown[]): MarkdownIt
   }
   type MarkdownItCtor = {
     new (options?: MarkdownItOptions): MarkdownIt

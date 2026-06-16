@@ -142,6 +142,8 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Timer, Loading, CircleCheck, CircleClose, WarningFilled, Upload as UploadIcon } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
+import 'katex/dist/katex.min.css'
+import markdownKatex from '@/utils/markdownMath'
 import { problemApi, submissionApi } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import { TERMINAL_STATUSES } from '@/types'
@@ -154,7 +156,7 @@ const LANGS = ['C++17', 'C++20', 'C', 'Python3']
 
 const route  = useRoute()
 const auth   = useAuthStore()
-const md     = new MarkdownIt({ html: false, linkify: true, typographer: true })
+const md     = new MarkdownIt({ html: false, linkify: true, typographer: true }).use(markdownKatex)
 
 const problem        = ref<Problem | null>(null)
 const loading        = ref(true)
@@ -337,6 +339,10 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   padding: 6px 10px;
 }
 .markdown-body :deep(th) { background: var(--oj-bg); }
+/* KaTeX 公式：块级公式过长时横向滚动；行内公式不要被 code 样式干扰 */
+.markdown-body :deep(.katex-display) { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.markdown-body :deep(.katex) { font-size: 1.05em; }
+.markdown-body :deep(.katex-error) { color: var(--el-color-danger, #f56c6c); }
 
 /* ── Submit card ── */
 .submit-header { display: flex; align-items: center; justify-content: space-between; }
