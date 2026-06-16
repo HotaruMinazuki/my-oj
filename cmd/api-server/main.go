@@ -33,6 +33,7 @@ import (
 	"github.com/your-org/my-oj/internal/core/contest"
 	"github.com/your-org/my-oj/internal/core/ranking"
 	"github.com/your-org/my-oj/internal/infra/postgres"
+	"github.com/your-org/my-oj/internal/mail"
 	"github.com/your-org/my-oj/internal/models"
 	"github.com/your-org/my-oj/internal/mq"
 	mqredis "github.com/your-org/my-oj/internal/mq/redis"
@@ -49,6 +50,12 @@ func main() {
 	minioSSL    := flag.Bool("minio-ssl",      false,            "Use TLS for MinIO connection")
 	jwtKey      := flag.String("jwt-key",      "",               "HMAC-SHA256 key for JWT validation (required)")
 	logLevel    := flag.String("log-level",    "info",           "Zap log level (debug|info|warn|error)")
+	smtpHost    := flag.String("smtp-host",    "",               "SMTP host for password-reset emails (empty = log codes instead of sending)")
+	smtpPort    := flag.Int("smtp-port",       465,              "SMTP port (465 implicit TLS; 587/25 STARTTLS)")
+	smtpUser    := flag.String("smtp-user",    "",               "SMTP username")
+	smtpPass    := flag.String("smtp-pass",    "",               "SMTP password / authorization code")
+	smtpFrom    := flag.String("smtp-from",    "",               "Email From address (defaults to smtp-user)")
+	appName     := flag.String("app-name",     "OJ",             "Application name shown in emails")
 	flag.Parse()
 
 	if *jwtKey == "" {
@@ -153,16 +160,27 @@ func main() {
 	)
 	hub := ranking.NewHub(rdb, log)
 
+	// ── Mailer (SMTP; falls back to log-only when -smtp-host is empty) ────────
+	mailer := mail.NewMailer(mail.Config{
+		Host: *smtpHost,
+		Port: *smtpPort,
+		User: *smtpUser,
+		Pass: *smtpPass,
+		From: *smtpFrom,
+	}, log)
+
 	// ── API server ────────────────────────────────────────────────────────────
 	srv := api.NewServer(
 		api.ServerConfig{
 			Addr:            *addr,
 			JWTSigningKey:   []byte(*jwtKey),
+			AppName:         *appName,
 			ReadTimeout:     30 * time.Second,
 			WriteTimeout:    60 * time.Second,
 			ShutdownTimeout: 15 * time.Second,
 		},
 		rdb,
+		mailer,
 		publisher,
 		store,
 		rankingService,

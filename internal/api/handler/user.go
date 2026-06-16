@@ -25,6 +25,8 @@ type UserDirectoryRepo interface {
 	UpdateProfile(ctx context.Context, id models.ID, organization string) error
 	// BindEmail attaches an email to an account that has none (one-shot).
 	BindEmail(ctx context.Context, id models.ID, email string) error
+	// UpdatePassword replaces a user's stored password hash.
+	UpdatePassword(ctx context.Context, id models.ID, passwordHash string) error
 }
 
 // SubmissionHistoryRepo lists submissions (newest first) and per-user stats.
@@ -211,6 +213,57 @@ func (h *UserHandler) bindEmail(c *gin.Context, uid models.ID, email string) boo
 		return false
 	}
 	return true
+}
+
+// ─── PUT /api/v1/users/me/password ────────────────────────────────────────────
+
+type changePasswordReq struct {
+	OldPassword string `json:"old_password" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=6"`
+}
+
+// ChangePassword lets the authenticated user change their own password after
+// verifying the current one.
+func (h *UserHandler) ChangePassword(c *gin.Context) {
+	uid, ok := mustUserID(c)
+	if !ok {
+		return
+	}
+	var req changePasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx := c.Request.Context()
+
+	u, err := h.users.GetByID(ctx, uid)
+	if err != nil || u == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	// 400 (not 401) on a wrong current password so the client doesn't treat it
+	// as an expired session and bounce the user to the login page.
+	if !checkPassword(req.OldPassword, u.PasswordHash) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "当前密码不正确"})
+		return
+	}
+	if req.NewPassword == req.OldPassword {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码不能与当前密码相同"})
+		return
+	}
+
+	hash, err := hashPassword(req.NewPassword)
+	if err != nil {
+		h.log.Error("change password: hash", zap.Error(err), zap.Int64("user_id", uid))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if err := h.users.UpdatePassword(ctx, uid, hash); err != nil {
+		h.log.Error("change password", zap.Error(err), zap.Int64("user_id", uid))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "password updated"})
 }
 
 // ─── GET /api/v1/users/:id/submissions ────────────────────────────────────────

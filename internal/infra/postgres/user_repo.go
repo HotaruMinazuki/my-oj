@@ -170,6 +170,19 @@ func (r *UserRepo) UpdateProfile(ctx context.Context, id models.ID, organization
 	return nil
 }
 
+// UpdatePassword replaces a user's stored password hash.
+func (r *UserRepo) UpdatePassword(ctx context.Context, id models.ID, passwordHash string) error {
+	const q = `UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1`
+	res, err := r.db.ExecContext(ctx, q, id, passwordHash)
+	if err != nil {
+		return fmt.Errorf("update password for user %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("user %d not found", id)
+	}
+	return nil
+}
+
 func (r *UserRepo) GetByID(ctx context.Context, id models.ID) (*models.User, error) {
 	const q = `
 SELECT id, username, email, password_hash, role, organization, created_at, updated_at

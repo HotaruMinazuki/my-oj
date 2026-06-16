@@ -40,6 +40,10 @@
           />
         </el-form-item>
 
+        <div class="auth-aux">
+          <router-link to="/forgot-password" class="link-text">忘记密码？</router-link>
+        </div>
+
         <el-button
           type="primary"
           native-type="submit"
@@ -143,6 +147,8 @@ async function handleLogin() {
 
 .auth-form :deep(.el-form-item) { margin-bottom: 16px; }
 .auth-form :deep(.el-form-item__label) { display: none; }
+
+.auth-aux { display: flex; justify-content: flex-end; margin: -6px 0 6px; font-size: 13px; }
 
 .auth-submit {
   width: 100%;

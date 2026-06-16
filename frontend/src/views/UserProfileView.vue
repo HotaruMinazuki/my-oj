@@ -22,7 +22,7 @@
               <span v-if="user.email">{{ user.email }}</span>
               <template v-else>
                 <span class="empty-val">未绑定邮箱</span>
-                <el-button v-if="isMe" link type="primary" @click="openEdit">立即绑定</el-button>
+                <el-button v-if="isMe" link type="primary" @click="activeTab = 'settings'">立即绑定</el-button>
               </template>
             </div>
           </div>
@@ -41,33 +41,8 @@
             </div>
           </div>
 
-          <el-button v-if="isMe" size="small" plain :icon="Edit" class="edit-btn" @click="openEdit">
-            编辑资料
-          </el-button>
         </div>
       </el-card>
-
-      <!-- 编辑资料对话框 -->
-      <el-dialog v-model="editVisible" title="编辑个人信息" width="440px">
-        <el-form label-width="90px">
-          <el-form-item label="学校/单位">
-            <el-input v-model="editOrg" maxlength="100" placeholder="用于比赛排行榜与滚榜展示" show-word-limit />
-          </el-form-item>
-          <el-form-item label="邮箱">
-            <!-- 已绑定: 只读 (一个邮箱只能绑定一个账号, 绑定后不可自助修改) -->
-            <div v-if="user?.email" class="bound-email">
-              <span>{{ user.email }}</span>
-              <span class="hint">已绑定，如需修改请联系管理员</span>
-            </div>
-            <!-- 未绑定: 可填写绑定 -->
-            <el-input v-else v-model="editEmail" placeholder="绑定后可用邮箱登录（选填）" />
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="editVisible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="saveProfile">保存</el-button>
-        </template>
-      </el-dialog>
 
       <!-- ── 历史记录 ── -->
       <el-card shadow="never" class="history-card">
@@ -137,6 +112,102 @@
               </template>
             </el-table>
           </el-tab-pane>
+
+          <!-- 修改信息: 仅本人可见 (个人资料 + 修改密码) -->
+          <el-tab-pane v-if="isMe" label="修改信息" name="settings">
+            <div class="settings-pane">
+              <!-- 个人资料 -->
+              <section class="settings-section">
+                <h4 class="settings-title">个人资料</h4>
+                <el-form label-width="90px" class="settings-form">
+                  <el-form-item label="学校/单位">
+                    <el-input v-model="editOrg" maxlength="100" placeholder="用于比赛排行榜与滚榜展示" show-word-limit />
+                  </el-form-item>
+                  <el-form-item label="邮箱">
+                    <!-- 已绑定: 只读 (一个邮箱只能绑定一个账号, 绑定后不可自助修改) -->
+                    <div v-if="user?.email" class="bound-email">
+                      <span>{{ user.email }}</span>
+                      <span class="hint">已绑定，如需修改请联系管理员</span>
+                    </div>
+                    <!-- 未绑定: 可填写绑定 -->
+                    <el-input v-else v-model="editEmail" placeholder="绑定后可用邮箱登录（选填）" />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" :loading="saving" @click="saveProfile">保存资料</el-button>
+                  </el-form-item>
+                </el-form>
+              </section>
+
+              <el-divider />
+
+              <!-- 修改密码: 两种方式 -->
+              <section class="settings-section">
+                <h4 class="settings-title">修改密码</h4>
+                <el-radio-group v-model="pwdMode" class="pwd-mode">
+                  <el-radio-button label="password">原密码修改</el-radio-button>
+                  <el-radio-button label="email">邮箱验证码</el-radio-button>
+                </el-radio-group>
+
+                <!-- 方式一: 原密码修改 -->
+                <el-form
+                  v-if="pwdMode === 'password'"
+                  ref="pwdFormRef"
+                  :model="pwdForm"
+                  :rules="pwdRules"
+                  label-width="90px"
+                  class="settings-form"
+                  @submit.prevent
+                >
+                  <el-form-item label="当前密码" prop="oldPassword">
+                    <el-input v-model="pwdForm.oldPassword" type="password" show-password placeholder="请输入当前密码" autocomplete="current-password" />
+                  </el-form-item>
+                  <el-form-item label="新密码" prop="newPassword">
+                    <el-input v-model="pwdForm.newPassword" type="password" show-password placeholder="至少 6 位" autocomplete="new-password" />
+                  </el-form-item>
+                  <el-form-item label="确认新密码" prop="confirmPassword">
+                    <el-input v-model="pwdForm.confirmPassword" type="password" show-password placeholder="再次输入新密码" autocomplete="new-password" @keyup.enter="changePassword" />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" :loading="changingPwd" @click="changePassword">修改密码</el-button>
+                  </el-form-item>
+                </el-form>
+
+                <!-- 方式二: 邮箱验证码修改 -->
+                <template v-else>
+                  <div v-if="!user?.email" class="pwd-tip">
+                    当前账号未绑定邮箱，无法通过邮箱验证码修改。请先在上方「个人资料」绑定邮箱。
+                  </div>
+                  <el-form
+                    v-else
+                    ref="emailPwdFormRef"
+                    :model="emailPwdForm"
+                    :rules="emailPwdRules"
+                    label-width="90px"
+                    class="settings-form"
+                    @submit.prevent
+                  >
+                    <el-form-item label="验证码" prop="code">
+                      <div class="code-row">
+                        <el-input v-model="emailPwdForm.code" maxlength="6" placeholder="发送至绑定邮箱的 6 位验证码" />
+                        <el-button :disabled="cooldownLeft > 0 || sendingCode" :loading="sendingCode" @click="sendEmailCode">
+                          {{ cooldownLeft > 0 ? `${cooldownLeft}s 后重发` : '发送验证码' }}
+                        </el-button>
+                      </div>
+                    </el-form-item>
+                    <el-form-item label="新密码" prop="newPassword">
+                      <el-input v-model="emailPwdForm.newPassword" type="password" show-password placeholder="至少 6 位" autocomplete="new-password" />
+                    </el-form-item>
+                    <el-form-item label="确认新密码" prop="confirmPassword">
+                      <el-input v-model="emailPwdForm.confirmPassword" type="password" show-password placeholder="再次输入新密码" autocomplete="new-password" @keyup.enter="changePasswordByEmail" />
+                    </el-form-item>
+                    <el-form-item>
+                      <el-button type="primary" :loading="changingByEmail" @click="changePasswordByEmail">确认修改</el-button>
+                    </el-form-item>
+                  </el-form>
+                </template>
+              </section>
+            </div>
+          </el-tab-pane>
         </el-tabs>
       </el-card>
     </template>
@@ -145,13 +216,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Edit, Message } from '@element-plus/icons-vue'
+import type { FormInstance } from 'element-plus'
+import { Message } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
-import { userApi } from '@/api/http'
+import { userApi, authApi } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
+import { useCountdown } from '@/composables/useCountdown'
 import type { Contest, SubmissionListItem, UserPublic, UserSubmissionStats } from '@/types'
 
 const route  = useRoute()
@@ -176,16 +249,15 @@ const subTotal     = ref(0)
 const contests        = ref<Contest[]>([])
 const loadingContests = ref(false)
 
-// ── Profile edit (own profile only) ─────────────────────────────────────────
-const editVisible = ref(false)
-const editOrg     = ref('')
-const editEmail   = ref('')
-const saving      = ref(false)
+// ── 修改信息 (本人专属): 个人资料 ────────────────────────────────────────────
+const editOrg   = ref('')
+const editEmail = ref('')
+const saving    = ref(false)
 
-function openEdit() {
+// 进入页面 / 切换用户后, 用当前资料回填表单。
+function resetEditForm() {
   editOrg.value = user.value?.organization ?? ''
   editEmail.value = ''  // 仅未绑定时使用; 已绑定的邮箱只读展示
-  editVisible.value = true
 }
 
 async function saveProfile() {
@@ -211,12 +283,102 @@ async function saveProfile() {
       if (res.email !== undefined) auth.user.email = res.email
       localStorage.setItem('oj_user', JSON.stringify(auth.user))
     }
-    editVisible.value = false
     ElMessage.success('已保存')
   } catch {
     // 错误信息已由 http 拦截器统一提示 (如邮箱已被占用)。
   } finally {
     saving.value = false
+  }
+}
+
+// ── 修改密码 ─────────────────────────────────────────────────────────────────
+const pwdMode     = ref<'password' | 'email'>('password')
+const pwdFormRef  = ref<FormInstance>()
+const pwdForm     = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
+const changingPwd = ref(false)
+const pwdRules = {
+  oldPassword:     [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
+  newPassword:     [{ required: true, min: 6, message: '新密码至少 6 位', trigger: 'blur' }],
+  confirmPassword: [{ required: true, message: '请再次输入新密码', trigger: 'blur' }],
+}
+
+async function changePassword() {
+  const valid = await pwdFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  if (pwdForm.newPassword !== pwdForm.confirmPassword) {
+    ElMessage.error('两次输入的新密码不一致')
+    return
+  }
+  changingPwd.value = true
+  try {
+    await userApi.changePassword({
+      old_password: pwdForm.oldPassword,
+      new_password: pwdForm.newPassword,
+    })
+    ElMessage.success('密码修改成功')
+    pwdFormRef.value?.resetFields()
+  } catch {
+    // 错误信息由 http 拦截器统一提示 (如当前密码不正确)。
+  } finally {
+    changingPwd.value = false
+  }
+}
+
+// ── 修改密码: 邮箱验证码方式 (复用找回密码端点, identifier 用当前用户名) ───────
+const emailPwdFormRef = ref<FormInstance>()
+const emailPwdForm    = reactive({ code: '', newPassword: '', confirmPassword: '' })
+const emailPwdRules = {
+  code:            [{ required: true, message: '请输入验证码', trigger: 'blur' }],
+  newPassword:     [{ required: true, min: 6, message: '新密码至少 6 位', trigger: 'blur' }],
+  confirmPassword: [{ required: true, message: '请再次输入新密码', trigger: 'blur' }],
+}
+const sendingCode     = ref(false)
+const changingByEmail = ref(false)
+
+// 60s 重发倒计时 (复用倒计时 composable)
+const cooldownUntil = ref<string | null>(null)
+const { total: cooldownTotal } = useCountdown(cooldownUntil)
+const cooldownLeft = computed(() => Math.ceil(cooldownTotal.value / 1000))
+
+async function sendEmailCode() {
+  if (!auth.user?.username) return
+  sendingCode.value = true
+  try {
+    const res = await authApi.requestPasswordReset(auth.user.username)
+    cooldownUntil.value = dayjs().add(60, 'second').toISOString()
+    if (res.smtp_enabled) {
+      ElMessage.success(`验证码已发送至 ${res.email}`)
+    } else {
+      ElMessage.success('验证码已生成（开发模式：请在服务端日志查看）')
+    }
+  } catch {
+    // 错误信息已由 http 拦截器统一提示。
+  } finally {
+    sendingCode.value = false
+  }
+}
+
+async function changePasswordByEmail() {
+  const valid = await emailPwdFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  if (emailPwdForm.newPassword !== emailPwdForm.confirmPassword) {
+    ElMessage.error('两次输入的新密码不一致')
+    return
+  }
+  if (!auth.user?.username) return
+  changingByEmail.value = true
+  try {
+    await authApi.confirmPasswordReset({
+      identifier: auth.user.username,
+      code: emailPwdForm.code.trim(),
+      new_password: emailPwdForm.newPassword,
+    })
+    ElMessage.success('密码修改成功')
+    emailPwdFormRef.value?.resetFields()
+  } catch {
+    // 错误信息已由 http 拦截器统一提示 (如验证码不正确)。
+  } finally {
+    changingByEmail.value = false
   }
 }
 
@@ -227,6 +389,7 @@ async function fetchProfile() {
     const data = await userApi.profile(Number(route.params.id))
     user.value  = data.user
     stats.value = data.stats
+    if (isMe.value) resetEditForm()
   } finally {
     loading.value = false
   }
@@ -286,6 +449,8 @@ function contestStatusCn(s: string) {
 watch(() => route.params.id, () => {
   if (!route.params.id) return
   subPage.value = 1
+  // 切换到别人主页时回到默认页 (修改信息 tab 仅本人可见)。
+  activeTab.value = 'submissions'
   fetchProfile()
   fetchSubmissions()
   fetchContests()
@@ -323,7 +488,6 @@ watch(() => route.params.id, () => {
 .bound-email .hint { color: var(--oj-text-3); font-size: 12px; }
 
 .profile-stats { display: flex; gap: 28px; }
-.edit-btn { flex-shrink: 0; }
 .stat { text-align: center; }
 .stat-num   { font-size: 22px; font-weight: 700; color: var(--oj-primary); }
 .stat-num.ac { color: var(--oj-success); }
@@ -332,4 +496,13 @@ watch(() => route.params.id, () => {
 .history-card :deep(.el-table .el-table__row) { cursor: pointer; }
 .pagination { display: flex; justify-content: flex-end; margin-top: 16px; }
 .empty-hint { color: var(--oj-text-3); font-size: 13px; }
+
+/* 修改信息 tab */
+.settings-pane { max-width: 460px; padding-top: 4px; }
+.settings-section { margin-bottom: 4px; }
+.settings-title { margin: 0 0 14px; font-size: 15px; font-weight: 600; color: var(--oj-text); }
+.pwd-mode { margin-bottom: 16px; }
+.code-row { display: flex; gap: 8px; width: 100%; }
+.code-row .el-input { flex: 1; }
+.pwd-tip { color: var(--oj-text-3); font-size: 13px; line-height: 1.6; padding: 4px 0 12px; }
 </style>

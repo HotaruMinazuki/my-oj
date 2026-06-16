@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -13,9 +14,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/your-org/my-oj/internal/api/middleware"
+	appmail "github.com/your-org/my-oj/internal/mail"
 	"github.com/your-org/my-oj/internal/models"
 )
 
@@ -27,18 +30,39 @@ type AuthUserRepo interface {
 	// GetByLogin resolves an identifier that may be a username or an email.
 	GetByLogin(ctx context.Context, identifier string) (*models.User, error)
 	GetByID(ctx context.Context, id models.ID) (*models.User, error)
+	UpdatePassword(ctx context.Context, id models.ID, passwordHash string) error
 }
 
-// AuthHandler handles /api/v1/auth/register and /api/v1/auth/login.
+// AuthHandler handles registration, login, and email password-reset.
 type AuthHandler struct {
 	users      AuthUserRepo
 	signingKey []byte
+	rdb        *redis.Client
+	mailer     appmail.Mailer
+	appName    string
 	log        *zap.Logger
 }
 
-func NewAuthHandler(users AuthUserRepo, signingKey []byte, log *zap.Logger) *AuthHandler {
-	return &AuthHandler{users: users, signingKey: signingKey, log: log}
+func NewAuthHandler(
+	users AuthUserRepo,
+	signingKey []byte,
+	rdb *redis.Client,
+	mailer appmail.Mailer,
+	appName string,
+	log *zap.Logger,
+) *AuthHandler {
+	if appName == "" {
+		appName = "OJ"
+	}
+	return &AuthHandler{users: users, signingKey: signingKey, rdb: rdb, mailer: mailer, appName: appName, log: log}
 }
+
+// Password-reset tunables.
+const (
+	resetCodeTTL     = 10 * time.Minute
+	resetCooldown    = 60 * time.Second
+	maxResetAttempts = 5
+)
 
 // ─── Register ─────────────────────────────────────────────────────────────────
 
@@ -173,6 +197,176 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, u)
+}
+
+// ─── Password reset (邮箱验证码找回) ───────────────────────────────────────────
+
+type resetRequestReq struct {
+	Identifier string `json:"identifier" binding:"required"` // 用户名或邮箱
+}
+
+// RequestPasswordReset emails a 6-digit code to the account's bound email.
+// POST /api/v1/auth/password-reset/request — public (used by the login page).
+func (h *AuthHandler) RequestPasswordReset(c *gin.Context) {
+	var req resetRequestReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx := c.Request.Context()
+
+	u, err := h.users.GetByLogin(ctx, strings.TrimSpace(req.Identifier))
+	if err != nil {
+		h.log.Error("reset request: lookup", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if u == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "账号不存在"})
+		return
+	}
+	if u.Email == nil || *u.Email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "该账号未绑定邮箱，无法通过邮箱找回密码"})
+		return
+	}
+	email := *u.Email
+
+	// 60s 重发冷却
+	cooldownKey := resetCooldownKey(u.ID)
+	if n, _ := h.rdb.Exists(ctx, cooldownKey).Result(); n > 0 {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "验证码发送过于频繁，请稍后再试"})
+		return
+	}
+
+	code, err := genVerifyCode()
+	if err != nil {
+		h.log.Error("reset request: gen code", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if err := h.rdb.Set(ctx, resetCodeKey(u.ID), code, resetCodeTTL).Err(); err != nil {
+		h.log.Error("reset request: store code", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	h.rdb.Set(ctx, cooldownKey, "1", resetCooldown)
+	h.rdb.Del(ctx, resetAttemptsKey(u.ID))
+
+	subject := fmt.Sprintf("【%s】密码重置验证码", h.appName)
+	body := fmt.Sprintf(
+		"您正在重置 %s 账号「%s」的登录密码。\r\n\r\n验证码：%s\r\n\r\n验证码 %d 分钟内有效，请勿泄露给他人。若非本人操作，请忽略此邮件。",
+		h.appName, u.Username, code, int(resetCodeTTL.Minutes()),
+	)
+	if err := h.mailer.Send(email, subject, body); err != nil {
+		h.log.Error("reset request: send email", zap.Error(err), zap.String("email", email))
+		h.rdb.Del(ctx, resetCodeKey(u.ID), cooldownKey)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "验证码发送失败，请稍后再试"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "验证码已发送",
+		"email":        maskEmail(email),
+		"smtp_enabled": h.mailer.Enabled(),
+	})
+}
+
+type resetConfirmReq struct {
+	Identifier  string `json:"identifier"   binding:"required"`
+	Code        string `json:"code"         binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=6"`
+}
+
+// ConfirmPasswordReset verifies the code and sets the new password.
+// POST /api/v1/auth/password-reset/confirm — public.
+func (h *AuthHandler) ConfirmPasswordReset(c *gin.Context) {
+	var req resetConfirmReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx := c.Request.Context()
+
+	u, err := h.users.GetByLogin(ctx, strings.TrimSpace(req.Identifier))
+	if err != nil {
+		h.log.Error("reset confirm: lookup", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if u == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "账号不存在"})
+		return
+	}
+
+	codeKey := resetCodeKey(u.ID)
+	stored, err := h.rdb.Get(ctx, codeKey).Result()
+	if err == redis.Nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码已过期或不存在，请重新获取"})
+		return
+	}
+	if err != nil {
+		h.log.Error("reset confirm: get code", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	if strings.TrimSpace(req.Code) != stored {
+		attemptsKey := resetAttemptsKey(u.ID)
+		n, _ := h.rdb.Incr(ctx, attemptsKey).Result()
+		h.rdb.Expire(ctx, attemptsKey, resetCodeTTL)
+		if n >= maxResetAttempts {
+			h.rdb.Del(ctx, codeKey)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "验证码错误次数过多，请重新获取"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码不正确"})
+		return
+	}
+
+	hash, err := hashPassword(req.NewPassword)
+	if err != nil {
+		h.log.Error("reset confirm: hash", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if err := h.users.UpdatePassword(ctx, u.ID, hash); err != nil {
+		h.log.Error("reset confirm: update password", zap.Error(err), zap.Int64("user_id", u.ID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	h.rdb.Del(ctx, codeKey, resetAttemptsKey(u.ID), resetCooldownKey(u.ID))
+
+	c.JSON(http.StatusOK, gin.H{"message": "密码已重置，请使用新密码登录"})
+}
+
+func resetCodeKey(id models.ID) string     { return fmt.Sprintf("pwdreset:code:%d", id) }
+func resetCooldownKey(id models.ID) string { return fmt.Sprintf("pwdreset:cd:%d", id) }
+func resetAttemptsKey(id models.ID) string { return fmt.Sprintf("pwdreset:attempts:%d", id) }
+
+// genVerifyCode returns a 6-digit numeric verification code.
+func genVerifyCode() (string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%06d", n.Int64()), nil
+}
+
+// maskEmail partially hides an email for display, e.g. ab***@example.com.
+func maskEmail(email string) string {
+	at := strings.LastIndex(email, "@")
+	if at <= 0 {
+		return "***"
+	}
+	local, domain := email[:at], email[at:]
+	switch {
+	case len(local) <= 1:
+		return local + "***" + domain
+	case len(local) <= 3:
+		return local[:1] + "***" + domain
+	default:
+		return local[:2] + "***" + domain
+	}
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

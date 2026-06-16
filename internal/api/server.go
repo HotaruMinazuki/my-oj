@@ -13,6 +13,7 @@ import (
 	"github.com/your-org/my-oj/internal/api/handler"
 	"github.com/your-org/my-oj/internal/api/middleware"
 	"github.com/your-org/my-oj/internal/core/ranking"
+	appmail "github.com/your-org/my-oj/internal/mail"
 	"github.com/your-org/my-oj/internal/models"
 	"github.com/your-org/my-oj/internal/mq"
 	"github.com/your-org/my-oj/internal/storage"
@@ -22,6 +23,7 @@ import (
 type ServerConfig struct {
 	Addr            string
 	JWTSigningKey   []byte
+	AppName         string
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	ShutdownTimeout time.Duration
@@ -39,6 +41,7 @@ type Server struct {
 func NewServer(
 	cfg ServerConfig,
 	rdb *redis.Client,
+	mailer appmail.Mailer,
 	publisher mq.Publisher,
 	store storage.ObjectStore,
 	rankingService *ranking.RankingService,
@@ -94,7 +97,7 @@ func NewServer(
 	rankingH    := handler.NewRankingHandler(hub, rdb, log)
 	submissionH := handler.NewSubmissionHandler(submissions, problems, contests, publisher, store, log)
 	adminH      := handler.NewAdminHandler(rankingService, store, testcases, log)
-	authH       := handler.NewAuthHandler(users, cfg.JWTSigningKey, log)
+	authH       := handler.NewAuthHandler(users, cfg.JWTSigningKey, rdb, mailer, cfg.AppName, log)
 	problemH    := handler.NewProblemHandler(problemList, log)
 	contestH    := handler.NewContestHandler(contests, log)
 	userH       := handler.NewUserHandler(userDirectory, submissionHistory, contestHistory, log)
@@ -114,6 +117,9 @@ func NewServer(
 		// Auth
 		v1.POST("/auth/register", authH.Register)
 		v1.POST("/auth/login", authH.Login)
+		// 邮箱验证码找回密码 (登录页也可用, 无需登录)
+		v1.POST("/auth/password-reset/request", authH.RequestPasswordReset)
+		v1.POST("/auth/password-reset/confirm", authH.ConfirmPasswordReset)
 		v1.GET("/auth/me", auth, authH.Me)
 
 		// Problems (public list; detail visible if is_public or admin)
@@ -141,6 +147,8 @@ func NewServer(
 		{
 			// Edit own profile (organization/学校, used by resolver export).
 			authed.PUT("/users/me", userH.UpdateMe)
+			// Change own password (verifies the current password).
+			authed.PUT("/users/me/password", userH.ChangePassword)
 
 			authed.POST("/contests/:contest_id/register", contestH.RegisterParticipant)
 

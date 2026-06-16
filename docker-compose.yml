@@ -108,6 +108,14 @@ services:
       - "-minio-secret=minioadmin"
       - "-jwt-key=change-me-in-production"
       - "-log-level=info"
+      # 找回密码邮件: 未配置 SMTP 时验证码仅写入容器日志; 配置后真正发送。
+      # 163 邮箱示例 (-smtp-pass 填“客户端授权码”而非登录密码), 取消注释并替换:
+      # - "-smtp-host=smtp.163.com"
+      # - "-smtp-port=465"
+      # - "-smtp-user=youraccount@163.com"
+      # - "-smtp-pass=your-authorization-code"
+      # - "-smtp-from=youraccount@163.com"
+      # - "-app-name=OJ"
     networks:
       - oj-net
     healthcheck:

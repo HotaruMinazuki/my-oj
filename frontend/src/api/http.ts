@@ -56,6 +56,14 @@ export const authApi = {
 
   me: () =>
     http.get<User>('/auth/me').then(r => r.data),
+
+  // 邮箱验证码找回密码 (登录页 / 修改信息均可用, 无需登录)。
+  requestPasswordReset: (identifier: string) =>
+    http.post<{ message: string; email: string; smtp_enabled: boolean }>(
+      '/auth/password-reset/request', { identifier }).then(r => r.data),
+
+  confirmPasswordReset: (data: { identifier: string; code: string; new_password: string }) =>
+    http.post('/auth/password-reset/confirm', data).then(r => r.data),
 }
 
 // ─── Problem API ──────────────────────────────────────────────────────────────
@@ -164,6 +172,10 @@ export const userApi = {
   // email when the account has none (one-shot — cannot change an existing one).
   updateMe: (data: { organization: string; email?: string }) =>
     http.put<{ organization: string; email?: string | null }>('/users/me', data).then(r => r.data),
+
+  // Change own password (server verifies the current password).
+  changePassword: (data: { old_password: string; new_password: string }) =>
+    http.put('/users/me/password', data).then(r => r.data),
 }
 
 // ─── Admin API (用户管理 / 全部提交) ──────────────────────────────────────────
