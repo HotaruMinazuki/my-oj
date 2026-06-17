@@ -179,7 +179,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -215,7 +215,7 @@ const cdTarget = computed<string | null>(() => {
     return contest.value.end_time
   return null
 })
-const { formatted: cdFormatted } = useCountdown(cdTarget)
+const { formatted: cdFormatted, expired: cdExpired } = useCountdown(cdTarget)
 
 // Before the contest starts, non-admins see only a countdown — the problem list
 // (and the backend that feeds it) stay hidden until the start time passes.
@@ -263,6 +263,34 @@ async function fetchProblems() {
     loadingProblems.value = false
   }
 }
+
+// 倒计时归零后，服务端的比赛阶段(ready→running→ended)即将/已经改变。
+// 重新拉取直到 status 真的变化为止——容忍客户端与服务端的时钟偏差，
+// 避免只刷一次却因本地时钟略快而仍停在旧状态。
+let transitionPoll: ReturnType<typeof setInterval> | null = null
+
+function stopTransitionPoll() {
+  if (transitionPoll) { clearInterval(transitionPoll); transitionPoll = null }
+}
+
+function startTransitionPoll() {
+  if (transitionPoll) return
+  const before = contest.value?.status
+  transitionPoll = setInterval(async () => {
+    await fetchContest()
+    if (contest.value?.status !== before) {
+      stopTransitionPoll()
+      // 进入比赛后题目列表需要重新拉(notStarted 此时已变 false)。
+      if (!notStarted.value) await fetchProblems()
+    }
+  }, 3000)
+}
+
+watch(cdExpired, (isExpired) => {
+  if (isExpired) startTransitionPoll()
+})
+
+onBeforeUnmount(stopTransitionPoll)
 
 async function handleRegister() {
   if (!auth.isLoggedIn) { router.push('/login'); return }
