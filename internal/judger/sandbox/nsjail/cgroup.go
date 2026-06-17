@@ -100,6 +100,60 @@ func readCgroupPeakKB(dir string) int64 {
 	return (n + 1023) / 1024
 }
 
+// readCgroupCPUMs reads cpu.stat's usage_usec (total CPU time) from the cgroup dir
+// and returns it in milliseconds. cpu.stat is ALWAYS present on cgroup v2 — even
+// without the cpu controller delegated to subtree_control — and its counters are
+// hierarchical; a removed child's usage is folded into the parent on rmdir, so a
+// nested NSJAIL.<pid>'s CPU time is still counted here after nsjail tears that
+// child down. Returns 0 on any error (degrade, never break a run).
+func readCgroupCPUMs(dir string) int64 {
+	b, err := os.ReadFile(filepath.Join(dir, "cpu.stat"))
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 && f[0] == "usage_usec" {
+			if n, err := strconv.ParseInt(f[1], 10, 64); err == nil && n >= 0 {
+				return n / 1000
+			}
+		}
+	}
+	return 0
+}
+
+// cgroupOOMKilled reports whether the kernel OOM-killed any process in the cgroup
+// subtree during the run. It reads memory.events, whose counters are HIERARCHICAL,
+// so an OOM kill inside nsjail's nested NSJAIL.<pid> cgroup (where --cgroup_mem_max
+// sets memory.max) is also counted on our parent dir — and it survives nsjail
+// removing that child, because the kernel increments every ancestor's counter at
+// kill time rather than summing live children.
+//
+// This is the authoritative MLE signal. parseResult's log-scraping heuristic
+// ("memory"+"killed") misses OOM kills on minimal nsjail builds that don't log
+// them, which made a 440MB allocation under a 256MB cap land as RE instead of MLE.
+// Returns false if the file is missing or unreadable (degrade, never break a run).
+func cgroupOOMKilled(dir string) bool {
+	b, err := os.ReadFile(filepath.Join(dir, "memory.events"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			continue
+		}
+		// oom_kill: processes killed by the cgroup OOM killer.
+		// oom_group_kill: whole-cgroup kills (memory.oom.group); count either.
+		if f[0] == "oom_kill" || f[0] == "oom_group_kill" {
+			if n, err := strconv.ParseInt(f[1], 10, 64); err == nil && n > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // cleanupCgroupTree removes a cgroup directory and any descendant cgroups,
 // children first, using rmdir — cgroup dirs cannot be removed with os.RemoveAll
 // because their control files are not deletable. Errors are ignored (best-effort).

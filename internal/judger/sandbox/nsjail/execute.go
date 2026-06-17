@@ -87,11 +87,53 @@ func (s *Session) Execute(ctx context.Context, req *sandbox.ExecRequest) (*sandb
 
 	res := parseResult(cmd.ProcessState, waitErr, wallTime, logBuf.String())
 
-	// Prefer the cgroup-measured peak; parseResult's log-scraped value (usually 0)
-	// is only a fallback. Read before the deferred cleanup removes the cgroup.
+	// All measurements below read from the judger-owned cgroup; they must run
+	// before the deferred cleanupCgroupTree removes it. parseResult's log-scraped
+	// values are only fallbacks for when the cgroup is unavailable.
 	if useMemCgroup {
 		if kb := readCgroupPeakKB(memCgroup); kb > 0 {
 			res.MemUsedKB = kb
+		}
+
+		// ── MLE: authoritative kernel OOM counter (see cgroupOOMKilled). ──────────
+		// parseResult's log-scraping misses OOM kills on this nsjail build (it
+		// doesn't log them), so a process killed for exceeding memory.max was
+		// landing as RE. Don't override a time-limit verdict already read from the
+		// log — a CPU/wall-clock kill takes precedence.
+		if res.Status != sandbox.ExecTLE && res.Status != sandbox.ExecWallTLE &&
+			cgroupOOMKilled(memCgroup) {
+			res.Status = sandbox.ExecMLE
+			res.Message = "memory limit exceeded"
+		}
+
+		// ── Time: TimeLimitMs is a CPU-time limit, so report and judge on measured
+		// CPU time, not wall time. nsjail's log strings for time limits are as
+		// unreliable here as its OOM logging was (a real TLE could land as RE), and
+		// --rlimit_cpu only enforces whole seconds — so a sub-second overrun under a
+		// non-round limit can slip through. Measured cpu.stat closes both gaps. ────
+		if cpuMs := readCgroupCPUMs(memCgroup); cpuMs > 0 {
+			res.TimeUsedMs = cpuMs
+			if res.Status != sandbox.ExecMLE && req.Limits.TimeLimitMs > 0 {
+				// >= when the run was killed (rlimit_cpu kills at the ceil'd limit);
+				// strict > when it exited cleanly, so a program finishing right at
+				// the limit still passes.
+				killed := res.Status != sandbox.ExecOK
+				if (killed && cpuMs >= req.Limits.TimeLimitMs) ||
+					(!killed && cpuMs > req.Limits.TimeLimitMs) {
+					res.Status = sandbox.ExecTLE
+					res.Message = "CPU time limit exceeded"
+				}
+			}
+		}
+
+		// ── Wall-clock TLE: catches sleeping / blocking I/O that burns no CPU.
+		// Only upgrade a process that was actually killed; a clean finish under the
+		// wall cap is fine even if it idled. ──────────────────────────────────────
+		if res.Status != sandbox.ExecOK && res.Status != sandbox.ExecMLE &&
+			res.Status != sandbox.ExecTLE && req.Limits.WallTimeLimitMs > 0 &&
+			wallTime.Milliseconds() >= req.Limits.WallTimeLimitMs {
+			res.Status = sandbox.ExecWallTLE
+			res.Message = "wall-clock time limit exceeded"
 		}
 	}
 
