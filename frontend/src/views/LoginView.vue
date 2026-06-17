@@ -1,14 +1,11 @@
 <template>
   <div class="auth-page">
     <div class="auth-card oj-fade-in">
-      <!-- Logo / brand -->
       <div class="auth-brand">
-        <span class="brand-logo">⚡</span>
         <span class="brand-name">OJ</span>
       </div>
 
-      <h2 class="auth-title">欢迎回来</h2>
-      <p class="auth-sub">登录以参加比赛、提交代码</p>
+      <h2 class="auth-title">登录</h2>
 
       <el-form
         :model="form"

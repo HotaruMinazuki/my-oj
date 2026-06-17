@@ -5,7 +5,7 @@
       <div class="nav-inner">
         <!-- Brand -->
         <router-link to="/" class="brand">
-          ⚡ <span class="brand-text">OJ</span>
+          <span class="brand-text">OJ</span>
         </router-link>
 
         <!-- Desktop links -->
@@ -112,9 +112,7 @@
     <!-- ── Footer ── -->
     <footer class="app-footer">
       <div class="footer-inner">
-        <span>⚡ OJ — Online Judge System</span>
-        <span class="footer-sep">·</span>
-        <span>Powered by Go + Vue 3</span>
+        <span>OJ</span>
       </div>
     </footer>
   </div>

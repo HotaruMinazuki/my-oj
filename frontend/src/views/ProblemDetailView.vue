@@ -13,7 +13,7 @@
                     <el-icon><Timer /></el-icon> {{ problem.time_limit_ms }}ms
                   </el-tag>
                   <el-tag type="success">
-                    💾 {{ Math.round(problem.mem_limit_kb / 1024) }}MB
+                    {{ Math.round(problem.mem_limit_kb / 1024) }}MB
                   </el-tag>
                   <el-tag :type="judgeTagType(problem.judge_type)">
                     {{ judgeLabel(problem.judge_type) }}
@@ -117,7 +117,7 @@
                   <el-icon><Timer /></el-icon> {{ lastSubmission.time_used_ms }}ms
                 </span>
                 <span v-if="lastSubmission.mem_used_kb" class="sub-metric">
-                  💾 {{ Math.round(lastSubmission.mem_used_kb / 1024) }}MB
+                  {{ Math.round(lastSubmission.mem_used_kb / 1024) }}MB
                 </span>
                 <router-link :to="`/submissions/${lastSubmission.id}`" class="link-text sub-detail">
                   详情 →

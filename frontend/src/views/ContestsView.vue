@@ -4,7 +4,6 @@
     <div class="pg-head">
       <div>
         <h2 class="pg-title">比赛列表</h2>
-        <p class="pg-sub">ICPC / OI 赛制，实时排行榜</p>
       </div>
     </div>
 
@@ -24,7 +23,7 @@
 
       <div v-else class="contest-grid">
         <el-card
-          v-for="c in filtered"
+          v-for="c in paged"
           :key="c.id"
           shadow="hover"
           class="contest-card"
@@ -72,21 +71,20 @@
     </div>
 
     <!-- Pagination -->
-    <div v-if="total > pageSize" class="pagination">
+    <div v-if="filtered.length > pageSize" class="pagination">
       <el-pagination
         v-model:current-page="page"
-        :total="total"
+        :total="filtered.length"
         :page-size="pageSize"
         layout="prev, pager, next, total"
         background
-        @current-change="fetchContests"
       />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, defineComponent, h } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, defineComponent, h } from 'vue'
 import { Clock, Timer } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { contestApi } from '@/api/http'
@@ -106,29 +104,53 @@ const CountdownText = defineComponent({
 const contests = ref<Contest[]>([])
 const loading  = ref(false)
 const page     = ref(1)
-const total    = ref(0)
 const pageSize = 20
 const filter   = ref<'all' | 'running' | 'ready' | 'ended'>('all')
 
+// Live "now", ticked every second, so each card's phase is derived from the clock
+// rather than the server's snapshot at fetch time — the status tag, countdown and
+// filter then stay consistent as the contest starts/ends, without a refetch.
+const nowMs = ref(Date.now())
+let nowTimer: ReturnType<typeof setInterval> | null = null
+
+// liveStatus mirrors the backend EffectiveStatus.
+function liveStatus(c: Contest): string {
+  const start = new Date(c.start_time).getTime()
+  const end   = new Date(c.end_time).getTime()
+  if (nowMs.value < start) return 'ready'
+  if (nowMs.value >= end)  return 'ended'
+  if (c.freeze_time && nowMs.value >= new Date(c.freeze_time).getTime()) return 'frozen'
+  return 'running'
+}
+
+// Each contest with its status replaced by the live, clock-derived phase.
+const withStatus = computed(() => contests.value.map(c => ({ ...c, status: liveStatus(c) })))
+
 const filtered = computed(() => {
-  if (filter.value === 'all') return contests.value
-  return contests.value.filter(c => {
+  if (filter.value === 'all') return withStatus.value
+  return withStatus.value.filter(c => {
     if (filter.value === 'running') return c.status === 'running' || c.status === 'frozen'
     return c.status === filter.value
   })
 })
 
+// Filter + pagination are both client-side, so the page count matches what the
+// filter actually shows (the contest list API has no status filter).
+const paged = computed(() =>
+  filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize)
+)
+
 function applyFilter() {
-  // Filter is local (no server-side filter in current API), just reset page
   page.value = 1
 }
 
 async function fetchContests() {
   loading.value = true
   try {
-    const data = await contestApi.list(page.value, pageSize)
+    // Pull the whole list once (API caps page size at 100) and filter/paginate on
+    // the client; an OJ rarely has more contests than that.
+    const data = await contestApi.list(1, 100)
     contests.value = data.contests ?? []
-    total.value    = data.total    ?? 0
   } finally {
     loading.value = false
   }
@@ -147,7 +169,11 @@ function statusTagType(s: string): '' | 'success' | 'warning' | 'info' | 'danger
   return map[s] ?? ''
 }
 
-onMounted(fetchContests)
+onMounted(() => {
+  fetchContests()
+  nowTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
+})
+onBeforeUnmount(() => { if (nowTimer) clearInterval(nowTimer) })
 </script>
 
 <style scoped>

@@ -2,12 +2,10 @@
   <div class="auth-page">
     <div class="auth-card oj-fade-in">
       <div class="auth-brand">
-        <span class="brand-logo">⚡</span>
         <span class="brand-name">OJ</span>
       </div>
 
       <h2 class="auth-title">找回密码</h2>
-      <p class="auth-sub">通过账号绑定邮箱的验证码重置密码</p>
 
       <el-form
         :model="form"

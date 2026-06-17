@@ -6,8 +6,8 @@
         <el-card shadow="never" class="stat-card">
           <el-statistic title="快速导航" />
           <div class="quick-links">
-            <router-link to="/admin/problems"><el-button type="primary" plain style="width:100%">📝 创建题目</el-button></router-link>
-            <router-link to="/admin/contests"><el-button type="success" plain style="width:100%">🏆 创建比赛</el-button></router-link>
+            <router-link to="/admin/problems"><el-button type="primary" plain style="width:100%">创建题目</el-button></router-link>
+            <router-link to="/admin/contests"><el-button type="success" plain style="width:100%">创建比赛</el-button></router-link>
           </div>
         </el-card>
       </el-col>

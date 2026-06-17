@@ -38,7 +38,7 @@
           </el-descriptions-item>
           <el-descriptions-item label="内存">
             <span v-if="sub.mem_used_kb">
-              💾 {{ Math.round(sub.mem_used_kb / 1024) }}MB
+              {{ Math.round(sub.mem_used_kb / 1024) }}MB
             </span>
             <span v-else class="empty-val">—</span>
           </el-descriptions-item>
@@ -212,12 +212,17 @@ async function copyCode() {
     ElMessage.error('复制失败')
   }
 }
-let   timer: ReturnType<typeof setInterval> | null = null
+let   timer: ReturnType<typeof setTimeout> | null = null
 let   pollCount = 0
-const MAX_POLL  = 60
+// Poll fast at first, then back off — but keep refreshing until the verdict is
+// final so a backed-up judge queue doesn't strand the page on "评测中".
+const FAST_POLLS = 40    // ~1 min at 1.5s before slowing down
+const FAST_MS    = 1500
+const SLOW_MS    = 5000
+const MAX_POLLS  = 160   // hard stop (~11 min) so it never polls forever
 
 const isTerminal = computed(() => sub.value ? TERMINAL_STATUSES.includes(sub.value.status) : true)
-const pollProgress = computed(() => Math.min(100, Math.round((pollCount / MAX_POLL) * 100)))
+const pollProgress = computed(() => Math.min(100, Math.round((pollCount / FAST_POLLS) * 100)))
 
 // ICPC hides a submission's score (it would leak the passed-testcase count); the
 // backend strips it and flags contest_type so the frontend drops the "得分" item.
@@ -233,17 +238,20 @@ async function fetchSub() {
     pollCount++
     // Pull the source once the submission is loaded, if the viewer may see it.
     if (canViewSource.value) loadSource()
-    if (isTerminal.value && timer) {
-      clearInterval(timer)
-      timer = null
-    }
-    if (pollCount >= MAX_POLL && timer) {
-      clearInterval(timer)
-      timer = null
-    }
   } finally {
     loading.value = false
   }
+}
+
+// Keep polling (with backoff) until the verdict is terminal or the hard cap is
+// reached, then stop.
+function scheduleNext() {
+  if (isTerminal.value || pollCount >= MAX_POLLS) return
+  const delay = pollCount < FAST_POLLS ? FAST_MS : SLOW_MS
+  timer = setTimeout(async () => {
+    await fetchSub()
+    scheduleNext()
+  }, delay)
 }
 
 // ── Status helpers ─────────────────────────────────────────────────────────
@@ -268,11 +276,11 @@ function statusCn(s: string) {
   return map[s] ?? s
 }
 
-onMounted(() => {
-  fetchSub()
-  timer = setInterval(fetchSub, 1500)
+onMounted(async () => {
+  await fetchSub()
+  scheduleNext()
 })
-onBeforeUnmount(() => { if (timer) clearInterval(timer) })
+onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 </script>
 
 <style scoped>
