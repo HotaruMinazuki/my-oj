@@ -204,7 +204,8 @@ func (h *ContestHandler) RegisterParticipant(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "contest has ended"})
 		return
 	}
-	if !contest.AllowLateRegister && contest.Status == models.ContestStatusRunning {
+	if !contest.AllowLateRegister &&
+		(contest.Status == models.ContestStatusRunning || contest.Status == models.ContestStatusFrozen) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "late registration not allowed"})
 		return
 	}
