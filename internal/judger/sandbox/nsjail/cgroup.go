@@ -53,6 +53,14 @@ func (s *Session) prepareMemCgroup() (mountDir string, ok bool) {
 		cleanupCgroupTree(base)
 		return "", false
 	}
+	// Disable swap for the whole subtree so a program that exceeds memory.max is
+	// OOM-killed at the RAM limit instead of silently spilling onto the host's swap
+	// file. Without this, RSS pins at the limit, no OOM fires, memory.peak reads
+	// exactly the limit, and the run is never flagged MLE — it just crawls on swap.
+	// Hierarchical: this caps nsjail's nested NSJAIL.<pid> too. Best-effort — the
+	// file is absent on kernels built without swap accounting (then there's no swap
+	// to limit anyway), so a write failure is not fatal.
+	_ = os.WriteFile(filepath.Join(base, "memory.swap.max"), []byte("0"), 0)
 	return base, true
 }
 
