@@ -34,8 +34,22 @@ func (s *Session) Execute(ctx context.Context, req *sandbox.ExecRequest) (*sandb
 	}
 	defer logR.Close() // write end is closed right after Start()
 
+	// ── Per-execution cgroup for peak-memory measurement ──────────────────────
+	// We point nsjail at a cgroup dir we own so we can read its memory.peak after
+	// nsjail tears down its own. Fail-safe: on any setup error this is a no-op and
+	// nsjail runs unchanged (memory just stays 0) — measuring must never break a run.
+	memCgroup, useMemCgroup := s.prepareMemCgroup()
+	if useMemCgroup {
+		defer cleanupCgroupTree(memCgroup)
+	}
+
 	// ── Build command ─────────────────────────────────────────────────────────
 	args := buildBaseArgs(&s.nsCfg, s.sbCfg, req.Limits)
+	if useMemCgroup {
+		// nsjail creates NSJAIL.<pid> under this dir; cgroup v2 charges memory
+		// hierarchically, so its peak shows up in <memCgroup>/memory.peak.
+		args = append(args, "--cgroupv2_mount", memCgroup)
+	}
 	args = append(args, "--") // separator: nsjail args / sandboxed program
 	args = append(args, req.Executable)
 	args = append(args, req.Args...)
@@ -72,6 +86,15 @@ func (s *Session) Execute(ctx context.Context, req *sandbox.ExecRequest) (*sandb
 	<-logDone // guarantee log is fully read before we parse it
 
 	res := parseResult(cmd.ProcessState, waitErr, wallTime, logBuf.String())
+
+	// Prefer the cgroup-measured peak; parseResult's log-scraped value (usually 0)
+	// is only a fallback. Read before the deferred cleanup removes the cgroup.
+	if useMemCgroup {
+		if kb := readCgroupPeakKB(memCgroup); kb > 0 {
+			res.MemUsedKB = kb
+		}
+	}
+
 	if res.Status != sandbox.ExecOK {
 		// Surface nsjail's own log: when nsjail itself dies (bad mount, cgroup
 		// setup, seccomp policy parse, exec failure) the reason exists ONLY

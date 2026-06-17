@@ -48,6 +48,11 @@ type Config struct {
 	// The parent cgroup must exist and the judger user must have write permission.
 	CgroupParent string
 
+	// CgroupRoot is the cgroup v2 unified-hierarchy mount point on the judger host,
+	// almost always "/sys/fs/cgroup". Used to locate the per-execution cgroup we
+	// create to measure peak memory. Defaults to "/sys/fs/cgroup".
+	CgroupRoot string
+
 	// CgroupV2 selects cgroup v2 flags.  Set true on kernels >= 4.15 with the
 	// unified hierarchy.  cgroup v1 is still supported via the legacy flags.
 	CgroupV2 bool
@@ -112,6 +117,9 @@ func New(cfg Config, log *zap.Logger) (*Sandbox, error) {
 	}
 	if cfg.CgroupParent == "" {
 		cfg.CgroupParent = "oj-judge"
+	}
+	if cfg.CgroupRoot == "" {
+		cfg.CgroupRoot = "/sys/fs/cgroup"
 	}
 	return &Sandbox{cfg: cfg, log: log}, nil
 }
