@@ -26,7 +26,7 @@
           </div>
         </template>
 
-        <el-descriptions :column="4" border size="small" class="ov-desc">
+        <el-descriptions :column="isICPC ? 3 : 4" border size="small" class="ov-desc">
           <el-descriptions-item label="语言">
             <el-tag size="small" effect="plain">{{ sub.language }}</el-tag>
           </el-descriptions-item>
@@ -42,7 +42,7 @@
             </span>
             <span v-else class="empty-val">—</span>
           </el-descriptions-item>
-          <el-descriptions-item label="得分">
+          <el-descriptions-item v-if="!isICPC" label="得分">
             <span v-if="sub.score != null" class="score">{{ sub.score }}</span>
             <span v-else class="empty-val">—</span>
           </el-descriptions-item>
@@ -218,6 +218,10 @@ const MAX_POLL  = 60
 
 const isTerminal = computed(() => sub.value ? TERMINAL_STATUSES.includes(sub.value.status) : true)
 const pollProgress = computed(() => Math.min(100, Math.round((pollCount / MAX_POLL) * 100)))
+
+// ICPC hides a submission's score (it would leak the passed-testcase count); the
+// backend strips it and flags contest_type so the frontend drops the "得分" item.
+const isICPC = computed(() => sub.value?.contest_type === 'ICPC')
 
 const acCount = computed(() =>
   (sub.value?.test_case_results ?? []).filter((r: any) => r.status === 'Accepted').length

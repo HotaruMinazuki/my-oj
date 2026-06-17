@@ -68,7 +68,7 @@ const (
 // ─── Register ─────────────────────────────────────────────────────────────────
 
 type registerReq struct {
-	Username     string `json:"username"     binding:"required,min=3,max=32"`
+	Username string `json:"username"     binding:"required,min=3,max=32"`
 	// Email is optional. When omitted the account starts unbound and can bind
 	// one later from the profile page.
 	Email        string `json:"email"        binding:"omitempty,email"`

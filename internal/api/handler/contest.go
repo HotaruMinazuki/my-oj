@@ -220,15 +220,15 @@ func (h *ContestHandler) RegisterParticipant(c *gin.Context) {
 // ─── Create (Admin)  POST /api/v1/admin/contests ──────────────────────────────
 
 type createContestReq struct {
-	Title             string                `json:"title"               binding:"required"`
-	Description       string                `json:"description"`
-	ContestType       models.ContestType    `json:"contest_type"`
-	StartTime         time.Time             `json:"start_time"          binding:"required"`
-	EndTime           time.Time             `json:"end_time"            binding:"required"`
-	FreezeTime        *time.Time            `json:"freeze_time"`
+	Title             string                 `json:"title"               binding:"required"`
+	Description       string                 `json:"description"`
+	ContestType       models.ContestType     `json:"contest_type"`
+	StartTime         time.Time              `json:"start_time"          binding:"required"`
+	EndTime           time.Time              `json:"end_time"            binding:"required"`
+	FreezeTime        *time.Time             `json:"freeze_time"`
 	Settings          models.ContestSettings `json:"settings"`
-	IsPublic          bool                  `json:"is_public"`
-	AllowLateRegister bool                  `json:"allow_late_register"`
+	IsPublic          bool                   `json:"is_public"`
+	AllowLateRegister bool                   `json:"allow_late_register"`
 }
 
 func (h *ContestHandler) Create(c *gin.Context) {

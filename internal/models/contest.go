@@ -44,8 +44,8 @@ type Contest struct {
 	ContestType ContestType   `db:"contest_type" json:"contest_type"`
 	Status      ContestStatus `db:"status"       json:"status"`
 
-	StartTime time.Time  `db:"start_time"  json:"start_time"`
-	EndTime   time.Time  `db:"end_time"    json:"end_time"`
+	StartTime time.Time `db:"start_time"  json:"start_time"`
+	EndTime   time.Time `db:"end_time"    json:"end_time"`
 	// FreezeTime is when the public scoreboard freezes. NULL = no freeze.
 	FreezeTime *time.Time `db:"freeze_time" json:"freeze_time,omitempty"`
 

@@ -18,7 +18,10 @@ import (
 
 // ─── stubs implementing the SubmissionHandler's collaborators ────────────────
 
-type stubSubmissionRepo struct{ created int }
+type stubSubmissionRepo struct {
+	created int
+	byID    *models.Submission // returned by GetByID when set
+}
 
 func (s *stubSubmissionRepo) Create(ctx context.Context, sub *models.Submission) error {
 	s.created++
@@ -26,7 +29,7 @@ func (s *stubSubmissionRepo) Create(ctx context.Context, sub *models.Submission)
 	return nil
 }
 func (s *stubSubmissionRepo) GetByID(ctx context.Context, id models.ID) (*models.Submission, error) {
-	return nil, nil
+	return s.byID, nil
 }
 func (s *stubSubmissionRepo) Update(ctx context.Context, sub *models.Submission) error { return nil }
 func (s *stubSubmissionRepo) ListPendingByContest(ctx context.Context, contestID models.ID) ([]*models.Submission, error) {
@@ -88,8 +91,8 @@ func (s *stubStore) PutFile(ctx context.Context, bucket, key, srcPath, contentTy
 func (s *stubStore) Stat(ctx context.Context, bucket, key string) (storage.ObjectInfo, error) {
 	return storage.ObjectInfo{}, nil
 }
-func (s *stubStore) Delete(ctx context.Context, bucket, key string) error    { return nil }
-func (s *stubStore) EnsureBucket(ctx context.Context, bucket string) error    { return nil }
+func (s *stubStore) Delete(ctx context.Context, bucket, key string) error  { return nil }
+func (s *stubStore) EnsureBucket(ctx context.Context, bucket string) error { return nil }
 
 // newSubmitContext builds a gin context for POST /contests/:contest_id/submissions.
 func newSubmitContext(contestID string, userID models.ID, body string) (*gin.Context, *httptest.ResponseRecorder) {

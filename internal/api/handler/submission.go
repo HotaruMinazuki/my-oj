@@ -473,6 +473,8 @@ func (h *SubmissionHandler) applyContestVisibility(c *gin.Context, sub *models.S
 	if contest.ContestType == models.ContestICPC {
 		sub.TestCaseResults = nil
 		sub.JudgeMessage = ""
+		sub.Score = 0                        // ICPC has no per-submission score; force 0 so it can't leak how many test cases passed
+		sub.ContestType = models.ContestICPC // hint the frontend to hide "得分"
 	}
 }
 

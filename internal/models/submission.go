@@ -34,11 +34,17 @@ func (t *TestCaseResults) Scan(src any) error {
 
 // Submission is created the moment a user submits code, before any judging occurs.
 type Submission struct {
-	ID        ID  `db:"id"         json:"id"`
-	UserID    ID  `db:"user_id"    json:"user_id"`
-	ProblemID ID  `db:"problem_id" json:"problem_id"`
+	ID        ID `db:"id"         json:"id"`
+	UserID    ID `db:"user_id"    json:"user_id"`
+	ProblemID ID `db:"problem_id" json:"problem_id"`
 	// ContestID is NULL for out-of-contest practice submissions.
 	ContestID *ID `db:"contest_id" json:"contest_id,omitempty"`
+
+	// ContestType is a response-only hint (not persisted) that lets the frontend
+	// adjust its display per contest format — ICPC hides a single submission's
+	// score so it can't leak how many test cases passed. Populated only by the
+	// submission-detail endpoint's visibility filter; empty for practice.
+	ContestType ContestType `db:"-" json:"contest_type,omitempty"`
 
 	Language Language `db:"language" json:"language"`
 	// SourceCodePath points to the raw source on shared storage.

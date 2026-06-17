@@ -97,6 +97,8 @@ export interface Submission {
   user_id: ID
   problem_id: ID
   contest_id?: ID | null
+  // Response-only hint set by the detail endpoint; ICPC → hide per-submission score.
+  contest_type?: ContestType
   language: Language
   status: SubmissionStatus
   score: number
