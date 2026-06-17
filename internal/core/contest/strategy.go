@@ -61,14 +61,25 @@ type ScoreEntry struct {
 	// IsPending is true when FrozenAttempts > 0 and the problem is not yet solved
 	// via a pre-freeze submission.  The UI shows "?" on pending cells.
 	IsPending bool `json:"is_pending,omitempty"`
-	// FrozenResults stores the actual judged outcomes of frozen submissions
-	// in chronological order.  Consumed one-by-one during 滚榜 (rolling reveal).
-	FrozenResults []models.SubmissionStatus `json:"frozen_results,omitempty"`
+	// FrozenResults stores the judged outcome AND submit time of each frozen
+	// submission in chronological order.  Consumed one-by-one during 滚榜
+	// (rolling reveal).  The submit time MUST be captured here at Apply time:
+	// it is what drives the revealed ICPC penalty (elapsed_minutes_at_AC).
+	FrozenResults []FrozenSubmission `json:"frozen_results,omitempty"`
 
 	// ── Metadata ─────────────────────────────────────────────────────────────
 	// IsFirstBlood is true for the first team to solve this problem.
 	// Set by the RankingService; shown as a badge in the UI.
 	IsFirstBlood bool `json:"is_first_blood,omitempty"`
+}
+
+// FrozenSubmission is one judged-but-hidden submission recorded during the
+// scoreboard freeze.  Both the verdict and the moment it was submitted are
+// retained so that 滚榜 (rolling reveal) can recompute the correct ICPC penalty
+// (elapsed_minutes_at_AC) instead of falling back to the contest end time.
+type FrozenSubmission struct {
+	Status     models.SubmissionStatus `json:"status"`
+	SubmitTime time.Time               `json:"submit_time"`
 }
 
 // RankRow is one entry in the rendered scoreboard sorted list.
@@ -186,7 +197,7 @@ func cloneOrNew(prev *ScoreEntry, ev SubmissionEvent) ScoreEntry {
 		cp := *prev
 		// Deep-copy the FrozenResults slice to avoid shared backing array.
 		if len(prev.FrozenResults) > 0 {
-			cp.FrozenResults = make([]models.SubmissionStatus, len(prev.FrozenResults))
+			cp.FrozenResults = make([]FrozenSubmission, len(prev.FrozenResults))
 			copy(cp.FrozenResults, prev.FrozenResults)
 		}
 		return cp

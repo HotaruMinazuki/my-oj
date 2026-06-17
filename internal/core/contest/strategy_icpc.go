@@ -55,7 +55,10 @@ func (s *ICPCStrategy) Apply(event SubmissionEvent, prev *ScoreEntry, settings C
 	if isPostFreeze(event.SubmitTime, event.FreezeTime) {
 		entry.FrozenAttempts++
 		entry.IsPending = true
-		entry.FrozenResults = append(entry.FrozenResults, event.Status)
+		entry.FrozenResults = append(entry.FrozenResults, FrozenSubmission{
+			Status:     event.Status,
+			SubmitTime: event.SubmitTime,
+		})
 		return &entry
 	}
 
@@ -150,7 +153,6 @@ func (s *ICPCStrategy) IsFinalised(entry *ScoreEntry, _ ContestSettings) bool {
 func (s *ICPCStrategy) RevealNext(
 	entry *ScoreEntry,
 	contestStart time.Time,
-	frozenSubmitTime time.Time,
 	settings ContestSettings,
 ) (updated *ScoreEntry, accepted bool) {
 	if len(entry.FrozenResults) == 0 {
@@ -160,7 +162,7 @@ func (s *ICPCStrategy) RevealNext(
 	e := cloneOrNew(entry, SubmissionEvent{UserID: entry.UserID, ProblemID: entry.ProblemID})
 
 	// Pop the chronologically earliest frozen submission.
-	status := e.FrozenResults[0]
+	frozen := e.FrozenResults[0]
 	e.FrozenResults = e.FrozenResults[1:]
 	e.FrozenAttempts--
 	if e.FrozenAttempts <= 0 {
@@ -168,16 +170,19 @@ func (s *ICPCStrategy) RevealNext(
 		e.IsPending = false
 	}
 
-	if status == models.StatusAccepted {
+	if frozen.Status == models.StatusAccepted {
 		penaltyMins := penaltyPerWA(settings)
-		elapsedMins := int(frozenSubmitTime.Sub(contestStart).Minutes())
+		// Penalty uses the submission's REAL time, captured at freeze time —
+		// not the contest end time. Falling back to EndTime would inflate every
+		// revealed AC's penalty to the full contest duration (see Apply).
+		elapsedMins := int(frozen.SubmitTime.Sub(contestStart).Minutes())
 
 		e.Accepted = true
 		e.DisplayScore = 1
 		e.IsPending = false
 		e.FrozenAttempts = 0
 		e.FrozenResults = nil
-		e.BestSubmitTime = frozenSubmitTime
+		e.BestSubmitTime = frozen.SubmitTime
 		e.Penalty = elapsedMins + e.WrongAttemptCount*penaltyMins
 		return &e, true
 	}

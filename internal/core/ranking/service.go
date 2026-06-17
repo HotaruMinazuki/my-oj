@@ -243,7 +243,7 @@ func (rs *RankingService) rebuildSnapshot(
 		if revealed {
 			if icpc, ok := strategy.(*contest.ICPCStrategy); ok {
 				for len(e.FrozenResults) > 0 {
-					rev, _ := icpc.RevealNext(&e, meta.StartTime, meta.EndTime, meta.Settings)
+					rev, _ := icpc.RevealNext(&e, meta.StartTime, meta.Settings)
 					e = *rev
 				}
 			}
