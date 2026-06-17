@@ -30,8 +30,6 @@ const (
 	// keyEvents is the Redis Pub/Sub channel for this contest's board updates.
 	// Payloads are full pre-serialised WS frames: {"type":"snapshot","data":{…}}.
 	keyEvents = "events"
-	// keyFirstBlood is a Redis Hash: field = "{pid}" → "1" (set when first blood lands)
-	keyFirstBlood = "firstblood"
 )
 
 // entryField formats the Hash field key for a (user, problem) pair.

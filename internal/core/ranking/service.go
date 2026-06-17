@@ -161,15 +161,6 @@ func (rs *RankingService) processContestResult(ctx context.Context, result *mq.R
 	}
 	newEntry := strategy.Apply(event, prev, meta.Settings)
 
-	// ── First blood (only when newly accepted) ───────────────────────────────
-	if newEntry.Accepted && (prev == nil || !prev.Accepted) {
-		set, err := rs.rdb.HSetNX(ctx, redisKey(contestID, keyFirstBlood),
-			fmt.Sprintf("%d", problemID), "1").Result()
-		if err == nil && set {
-			newEntry.IsFirstBlood = true
-		}
-	}
-
 	entryJSON, err := json.Marshal(newEntry)
 	if err != nil {
 		return fmt.Errorf("ranking: marshal entry: %w", err)
@@ -252,6 +243,13 @@ func (rs *RankingService) rebuildSnapshot(
 		entries = append(entries, &ec)
 	}
 
+	// First blood: per problem, the team with the earliest AC owns it. Computed
+	// here at display time (not via a live HSetNX) so it also covers ACs revealed
+	// from the freeze — those never flip Accepted on the persisted entry, so an
+	// event-time award would miss them. Recompute is deterministic and overrides
+	// any stale persisted flag.
+	assignFirstBlood(entries)
+
 	rows := strategy.Rank(entries, meta.Settings)
 
 	// Resolve labels + usernames.
@@ -329,6 +327,32 @@ func (rs *RankingService) rebuildSnapshot(
 		return nil, fmt.Errorf("store snapshot: %w", err)
 	}
 	return snapshot, nil
+}
+
+// assignFirstBlood recomputes the first-blood flag for a snapshot's entries:
+// for each problem, the team whose accepted submission has the earliest
+// BestSubmitTime owns first blood (ties broken by the smaller UserID for
+// determinism). It clears any pre-existing flag first, so the result depends
+// only on the entries given — covering ICPC ACs revealed from the freeze, whose
+// persisted entries were never flipped to Accepted at event time. It mutates the
+// passed (snapshot-local) entries in place; nothing is written back to Redis.
+func assignFirstBlood(entries []*contest.ScoreEntry) {
+	firstBlood := make(map[models.ID]*contest.ScoreEntry) // problemID -> earliest-AC entry
+	for _, e := range entries {
+		e.IsFirstBlood = false
+		if !e.Accepted || e.BestSubmitTime.IsZero() {
+			continue
+		}
+		cur := firstBlood[e.ProblemID]
+		if cur == nil ||
+			e.BestSubmitTime.Before(cur.BestSubmitTime) ||
+			(e.BestSubmitTime.Equal(cur.BestSubmitTime) && e.UserID < cur.UserID) {
+			firstBlood[e.ProblemID] = e
+		}
+	}
+	for _, e := range firstBlood {
+		e.IsFirstBlood = true
+	}
 }
 
 // publishSnapshot pushes the full board as a typed WS frame to the contest's
