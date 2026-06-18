@@ -443,16 +443,24 @@ func (h *SubmissionHandler) GetSubmissionSource(c *gin.Context) {
 //     "Pending": every judged field is stripped (verdict, score, resource usage,
 //     compile log, testcases). This holds even for a submission that was somehow
 //     judged early — defense in depth alongside 挂机模式's deferred judging.
-//   - ICPC → the per-testcase breakdown and judge message stay hidden (standard
-//     for the format); the compile log stays for the contestant's own CE.
+//   - ICPC while the contest is still running (incl. the freeze window) → the live
+//     verdict is secret to everyone EXCEPT the submission's author: a third party
+//     sees a neutral "Judging" view. Otherwise anyone could enumerate submission
+//     ids to read every contestant's real-time verdict and reconstruct the
+//     (frozen) scoreboard, defeating the freeze. The author still sees their own
+//     real verdict so the frontend can show judging progress — but never the
+//     per-testcase breakdown, judge message, or score.
+//   - ICPC once ended → the overall verdict becomes public; the per-testcase
+//     breakdown, judge message and score stay hidden (standard for the format).
 //
-// Once a contest has ended, full results are shown to everyone.
+// Once a non-blind contest has ended, the overall verdict is shown to everyone.
 func (h *SubmissionHandler) applyContestVisibility(c *gin.Context, sub *models.Submission) {
 	if sub.ContestID == nil {
 		return // practice submission — full details
 	}
-	roleVal, _ := c.Get(string(middleware.ContextKeyUserRole))
-	if role, _ := roleVal.(models.UserRole); role == models.RoleAdmin {
+	viewerID, _ := middleware.UserIDFromCtx(c) // 0 when unauthenticated (optAuth)
+	role, _ := middleware.RoleFromCtx(c)
+	if role == models.RoleAdmin {
 		return // admins always see everything
 	}
 
@@ -466,11 +474,23 @@ func (h *SubmissionHandler) applyContestVisibility(c *gin.Context, sub *models.S
 		return
 	}
 
-	if contest.IsBlindJudged() && contest.EffectiveStatus(time.Now().UTC()) != models.ContestStatusEnded {
+	ended := contest.EffectiveStatus(time.Now().UTC()) == models.ContestStatusEnded
+
+	// 盲考 (OI) must be checked before ICPC: it hides everything, not just the
+	// verdict, while the contest runs.
+	if contest.IsBlindJudged() && !ended {
 		maskBlind(sub)
 		return
 	}
 	if contest.ContestType == models.ContestICPC {
+		// Running (incl. frozen): hide the live verdict from everyone but the
+		// author, so submission-id enumeration can't rebuild the scoreboard.
+		if !ended && viewerID != sub.UserID {
+			maskJudging(sub)
+			return
+		}
+		// Author (running) or anyone (ended): real verdict, but never the
+		// per-testcase breakdown, judge message, or per-submission score.
 		sub.TestCaseResults = nil
 		sub.JudgeMessage = ""
 		sub.Score = 0                        // ICPC has no per-submission score; force 0 so it can't leak how many test cases passed
@@ -488,6 +508,21 @@ func maskBlind(sub *models.Submission) {
 	sub.CompileLog = ""
 	sub.JudgeMessage = ""
 	sub.TestCaseResults = nil
+}
+
+// maskJudging hides a running ICPC submission's verdict from third parties while
+// preserving a neutral "Judging" status — never the real AC/WA. It clears every
+// field that could leak the outcome (mirroring maskBlind) but keeps the ICPC
+// frontend hint so the masked response is shaped exactly like the author's view.
+func maskJudging(sub *models.Submission) {
+	sub.Status = models.StatusJudging
+	sub.Score = 0
+	sub.TimeUsedMs = 0
+	sub.MemUsedKB = 0
+	sub.CompileLog = ""
+	sub.JudgeMessage = ""
+	sub.TestCaseResults = nil
+	sub.ContestType = models.ContestICPC
 }
 
 // deferJudging reports whether a submission to this contest must be withheld from
