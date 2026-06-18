@@ -5,7 +5,6 @@
       <div class="hero-inner">
         <div class="hero-badge">ICPC / OI / IOI 多赛制</div>
         <h1 class="hero-title">在线算法评测系统</h1>
-        <p class="hero-sub">多语言沙盒评测 · 实时 WebSocket 排行榜 · 多赛制支持</p>
         <div class="hero-btns">
           <router-link to="/problems">
             <el-button type="primary" size="large" :icon="EditPen">开始刷题</el-button>
