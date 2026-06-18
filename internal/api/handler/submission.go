@@ -627,6 +627,7 @@ func (h *SubmissionHandler) publishJudgeTask(
 			UserID:         sub.UserID,
 			ProblemID:      sub.ProblemID,
 			ContestID:      sub.ContestID,
+			SubmittedAt:    sub.CreatedAt, // real submission instant; drives ICPC penalty & freeze
 			Language:       sub.Language,
 			SourceCodePath: sub.SourceCodePath,
 			JudgeType:      meta.JudgeType,

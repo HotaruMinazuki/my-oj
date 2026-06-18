@@ -83,6 +83,11 @@ type ResultMessage struct {
 	TestCaseResults []models.TestCaseResult `json:"test_case_results,omitempty"`
 	JudgeNodeID     string                  `json:"judge_node_id"`
 	JudgedAt        time.Time               `json:"judged_at"`
+	// SubmittedAt is the contestant's original submission time (Submission.CreatedAt),
+	// echoed back from the JudgeTask. The ranking service uses THIS — not JudgedAt —
+	// for ICPC penalty and freeze decisions. Zero for legacy messages enqueued before
+	// this field existed; the ranking service falls back to JudgedAt in that case.
+	SubmittedAt time.Time `json:"submitted_at"`
 }
 
 // ─── Serialisation Helpers ────────────────────────────────────────────────────

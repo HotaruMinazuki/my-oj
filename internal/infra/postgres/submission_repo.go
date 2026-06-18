@@ -249,12 +249,16 @@ ORDER  BY created_at, id`
 
 // ListPendingByContest returns the contest's still-unjudged (Pending) submissions
 // with just the columns needed to (re)build a JudgeTask: id, user, problem,
-// contest, language and the MinIO source key. It drives the deferred batch
-// evaluation (赛后评测) of 盲考 contests, whose submissions are withheld from the
-// judge until the contest ends.
+// contest, language, the MinIO source key and the original submission time. It
+// drives the deferred batch evaluation (赛后评测) of 盲考 contests, whose
+// submissions are withheld from the judge until the contest ends.
+//
+// created_at is selected so the rebuilt JudgeTask carries the real submission
+// instant (SubmittedAt); without it the batch path would enqueue a zero time and
+// the ranking service would fall back to judge-completion time.
 func (r *SubmissionRepo) ListPendingByContest(ctx context.Context, contestID models.ID) ([]*models.Submission, error) {
 	const q = `
-SELECT id, user_id, problem_id, contest_id, language, source_code_path, status
+SELECT id, user_id, problem_id, contest_id, language, source_code_path, status, created_at
 FROM   submissions
 WHERE  contest_id = $1 AND status = $2
 ORDER  BY id`
@@ -271,7 +275,7 @@ ORDER  BY id`
 		var contestID sql.NullInt64
 		if err := rows.Scan(
 			&s.ID, &s.UserID, &s.ProblemID, &contestID,
-			&s.Language, &s.SourceCodePath, &s.Status,
+			&s.Language, &s.SourceCodePath, &s.Status, &s.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending submission: %w", err)
 		}

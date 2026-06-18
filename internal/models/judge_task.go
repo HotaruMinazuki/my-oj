@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // JudgeTask is the self-contained message published to the judge queue.
 // A judger node MUST be able to execute the task with only this payload
 // plus access to object storage (MinIO) — no DB calls during judging.
@@ -10,6 +12,14 @@ type JudgeTask struct {
 	UserID       ID     `json:"user_id"`
 	ProblemID    ID     `json:"problem_id"`
 	ContestID    *ID    `json:"contest_id,omitempty"`
+
+	// SubmittedAt is the moment the contestant submitted (Submission.CreatedAt),
+	// carried through the judge pipeline so ranking penalty and the ICPC freeze
+	// boundary key off the submission instant — NOT the judge-completion time,
+	// which queueing/compile/run latency would inflate. This keeps the live board
+	// consistent with the official 滚榜 XML feed, which is built from this same
+	// submission timestamp (see api/handler/resolver.go).
+	SubmittedAt time.Time `json:"submitted_at"`
 
 	Language Language `json:"language"`
 	// SourceCodePath is the MinIO object key in the "submissions" bucket.

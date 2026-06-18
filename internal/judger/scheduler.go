@@ -238,6 +238,7 @@ func (s *Scheduler) runStateMachine(ctx context.Context, log *zap.Logger, task *
 			CompileLog:   compileResult.Log,
 			JudgeNodeID:  s.nodeID,
 			JudgedAt:     time.Now().UTC(),
+			SubmittedAt:  task.SubmittedAt,
 		})
 	}
 
@@ -340,6 +341,7 @@ func (s *Scheduler) runStateMachine(ctx context.Context, log *zap.Logger, task *
 		TestCaseResults: tcResults,
 		JudgeNodeID:     s.nodeID,
 		JudgedAt:        time.Now().UTC(),
+		SubmittedAt:     task.SubmittedAt,
 	})
 }
 
@@ -367,6 +369,7 @@ func (s *Scheduler) publishSE(ctx context.Context, task *models.JudgeTask, msg s
 		JudgeMessage: msg,
 		JudgeNodeID:  s.nodeID,
 		JudgedAt:     time.Now().UTC(),
+		SubmittedAt:  task.SubmittedAt,
 	})
 }
 

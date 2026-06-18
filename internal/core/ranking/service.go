@@ -155,7 +155,7 @@ func (rs *RankingService) processContestResult(ctx context.Context, result *mq.R
 		ProblemID:    problemID,
 		Status:       result.Status,
 		Score:        result.Score,
-		SubmitTime:   result.JudgedAt,
+		SubmitTime:   submitTimeOf(result),
 		ContestStart: meta.StartTime,
 		FreezeTime:   meta.FreezeTime,
 	}
@@ -178,6 +178,21 @@ func (rs *RankingService) processContestResult(ctx context.Context, result *mq.R
 		log.Warn("publish board snapshot failed", zap.Error(err))
 	}
 	return nil
+}
+
+// submitTimeOf returns the moment used for ranking penalty and the ICPC freeze
+// boundary: the contestant's real submission instant (SubmittedAt), NOT the
+// judge-completion time (JudgedAt). Keying off JudgedAt would let queueing,
+// compile and run latency inflate every team's penalty and could misclassify a
+// submission made before the freeze but judged after it as frozen.
+//
+// Falls back to JudgedAt for legacy result messages enqueued before SubmittedAt
+// was plumbed through the pipeline (zero value).
+func submitTimeOf(result *mq.ResultMessage) time.Time {
+	if result.SubmittedAt.IsZero() {
+		return result.JudgedAt
+	}
+	return result.SubmittedAt
 }
 
 // RevealContest is the admin-triggered 解榜 action: it marks the contest as
