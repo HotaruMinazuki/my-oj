@@ -34,6 +34,19 @@
 
 > 仅导出最终判定状态的提交；Pending/评测中/SystemError 不计入。比赛结束后的提交不计入。
 
+### 编译错误（CE）是否计罚时
+
+CE 的罚时口径由比赛 `settings.ce_no_penalty` 这一**单一事实来源**决定，实时排行榜
+（`core/contest` 的 ICPC 策略）与本导出的 XML（`<judgement>` 定义和每条 CE `<run>`
+的 `penalty`）都读取同一项，二者**始终一致**：
+
+- **默认（`ce_no_penalty` 缺省或为 `true`）：CE 不计罚时。** 贴合现代 ICPC 规则，也与
+  ICPC Tools Resolver 自带的标准判定类型一致。AC 之前的 CE 不会增加罚时。
+- `ce_no_penalty=false`：CE 计一次罚时，与 WA 等同（部分旧赛区规则）。
+
+> 该默认值在 `internal/models/contest.go` 的 `ContestSettings.CENoPenalty()` 中定义，
+> 是两侧唯一的取值来源；改默认只需改这一处。
+
 ## 3. 运行环境：Java 17+
 
 ICPC Resolver 2.6 需要 **Java 17 或更高**（Java 8 会报 `UnsupportedClassVersionError`）。

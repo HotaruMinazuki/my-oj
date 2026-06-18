@@ -78,8 +78,9 @@ func (s *ICPCStrategy) Apply(event SubmissionEvent, prev *ScoreEntry, settings C
 		// Penalty = submission time + 20 min × each WA before this AC.
 		entry.Penalty = elapsedMins + entry.WrongAttemptCount*penaltyMins
 	} else {
-		// WA / TLE / MLE / RE / CE — all count as a wrong attempt for penalty.
-		// CE is debatable; most regions count it. Configurable via settings.
+		// WA / TLE / MLE / RE count as a wrong attempt for penalty. CE is exempt
+		// by default (modern ICPC); penalise it via ce_no_penalty=false. See
+		// ignoreCE — the same policy drives the 滚榜 XML export.
 		if !ignoreCE(event.Status, settings) {
 			entry.WrongAttemptCount++
 		}
@@ -197,15 +198,10 @@ func (s *ICPCStrategy) RevealNext(
 // ─── Settings helpers ─────────────────────────────────────────────────────────
 
 // penaltyPerWA returns the penalty in minutes per wrong attempt before AC.
-// Default is 20 minutes per ICPC rules.
-// Override via settings["penalty_minutes"] (float64 from JSON).
+// Thin wrapper over ContestSettings.PenaltyMinutes, the single source of truth
+// shared with the 滚榜 XML export (default 20 minutes per ICPC rules).
 func penaltyPerWA(settings ContestSettings) int {
-	if v, ok := settings["penalty_minutes"]; ok {
-		if f, ok := v.(float64); ok && f >= 0 {
-			return int(f)
-		}
-	}
-	return 20
+	return settings.PenaltyMinutes()
 }
 
 // isPostFreeze returns true if t is at or after the freeze time.
@@ -213,13 +209,14 @@ func isPostFreeze(t time.Time, freezeTime *time.Time) bool {
 	return freezeTime != nil && !t.Before(*freezeTime)
 }
 
-// ignoreCE returns true if compile errors should not count as wrong attempts.
-// Default: CE counts (matches most regional judge rules).
-// Override via settings["ce_no_penalty"] = true.
+// ignoreCE returns true if a wrong attempt with this status should be skipped for
+// penalty purposes. Only Compile Errors are ever exempt, and only when the
+// contest's CE policy says so.
+//
+// The policy lives in ContestSettings.CENoPenalty, the single source of truth
+// shared with the 滚榜 XML export (api/handler resolver.go). Default — when
+// ce_no_penalty is unset — is CE does NOT count, matching modern ICPC and the
+// resolver feed so the live scoreboard and the滚榜 XML never disagree.
 func ignoreCE(status models.SubmissionStatus, settings ContestSettings) bool {
-	if status != models.StatusCE {
-		return false
-	}
-	v, _ := settings["ce_no_penalty"].(bool)
-	return v
+	return status == models.StatusCE && settings.CENoPenalty()
 }

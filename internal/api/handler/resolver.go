@@ -123,14 +123,19 @@ type xmlJudgementType struct {
 	Penalty bool   `xml:"penalty"`
 }
 
-// standardJudgementTypes are emitted for every contest so result acronyms resolve.
-var standardJudgementTypes = []xmlJudgementType{
-	{Acronym: "AC", Name: "Accepted", Solved: true, Penalty: false},
-	{Acronym: "WA", Name: "Wrong Answer", Solved: false, Penalty: true},
-	{Acronym: "TLE", Name: "Time Limit Exceeded", Solved: false, Penalty: true},
-	{Acronym: "MLE", Name: "Memory Limit Exceeded", Solved: false, Penalty: true},
-	{Acronym: "RTE", Name: "Run-Time Error", Solved: false, Penalty: true},
-	{Acronym: "CE", Name: "Compile Error", Solved: false, Penalty: false},
+// judgementTypes returns the <judgement> verdict definitions emitted for a
+// contest so result acronyms resolve. CE's penalty flag follows the contest's CE
+// policy (ContestSettings.CENoPenalty) — the same single source of truth the live
+// scoreboard reads — so a CE-before-AC team carries identical penalty on both.
+func judgementTypes(ceNoPenalty bool) []xmlJudgementType {
+	return []xmlJudgementType{
+		{Acronym: "AC", Name: "Accepted", Solved: true, Penalty: false},
+		{Acronym: "WA", Name: "Wrong Answer", Solved: false, Penalty: true},
+		{Acronym: "TLE", Name: "Time Limit Exceeded", Solved: false, Penalty: true},
+		{Acronym: "MLE", Name: "Memory Limit Exceeded", Solved: false, Penalty: true},
+		{Acronym: "RTE", Name: "Run-Time Error", Solved: false, Penalty: true},
+		{Acronym: "CE", Name: "Compile Error", Solved: false, Penalty: !ceNoPenalty},
+	}
 }
 
 type xmlInfo struct {
@@ -174,12 +179,11 @@ func buildEventFeed(
 	teams []postgres.ContestTeam,
 	subs []postgres.FeedSubmission,
 ) *xmlContest {
-	penalty := 20
-	if v, ok := contest.Settings["penalty_minutes"]; ok {
-		if f, ok := v.(float64); ok && f >= 0 {
-			penalty = int(f)
-		}
-	}
+	// Penalty minutes and CE penalty policy come from the same ContestSettings
+	// helpers the live scoreboard uses, so the exported feed and the running
+	// scoreboard never disagree.
+	penalty := contest.Settings.PenaltyMinutes()
+	ceNoPenalty := contest.Settings.CENoPenalty()
 
 	info := xmlInfo{
 		ContestID: fmt.Sprintf("%d", contest.ID),
@@ -199,7 +203,7 @@ func buildEventFeed(
 
 	feed := &xmlContest{
 		Info:       info,
-		Judgements: standardJudgementTypes,
+		Judgements: judgementTypes(ceNoPenalty),
 		// Mark the contest finalized so the Resolver treats it as over.
 		Finalized: &xmlFinalized{},
 	}
@@ -221,7 +225,7 @@ func buildEventFeed(
 	}
 
 	for _, s := range subs {
-		acronym, counts, judged := mapResult(s.Status)
+		acronym, counts, judged := mapResult(s.Status, ceNoPenalty)
 		if !judged {
 			continue // skip Pending / Judging / SystemError — not real verdicts
 		}
@@ -251,7 +255,9 @@ func buildEventFeed(
 }
 
 // mapResult maps an internal status to (CCS acronym, counts-as-penalty, is-judged-verdict).
-func mapResult(s models.SubmissionStatus) (acronym string, penalty bool, judged bool) {
+// ceNoPenalty carries the contest's CE policy (ContestSettings.CENoPenalty): when
+// false, a CE counts as a penalised wrong attempt, matching the live scoreboard.
+func mapResult(s models.SubmissionStatus, ceNoPenalty bool) (acronym string, penalty bool, judged bool) {
 	switch s {
 	case models.StatusAccepted:
 		return "AC", false, true
@@ -264,8 +270,9 @@ func mapResult(s models.SubmissionStatus) (acronym string, penalty bool, judged 
 	case models.StatusRE:
 		return "RTE", true, true
 	case models.StatusCE:
-		// Compile errors do not incur penalty by ICPC default.
-		return "CE", false, true
+		// CE is exempt from penalty by default (modern ICPC); penalise it via
+		// ce_no_penalty=false. Same policy as the live scoreboard's ignoreCE.
+		return "CE", !ceNoPenalty, true
 	default:
 		// Pending / Judging / Compiling / SystemError → not a contest verdict.
 		return "", false, false

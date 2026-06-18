@@ -36,6 +36,36 @@ func (s *ContestSettings) Scan(src any) error {
 	return json.Unmarshal(b, s)
 }
 
+// PenaltyMinutes returns the ICPC time penalty (minutes) added per wrong attempt
+// that precedes an AC. Default 20 (classic ICPC). Override via
+// settings["penalty_minutes"] (stored as float64 after a JSON round-trip).
+func (s ContestSettings) PenaltyMinutes() int {
+	if v, ok := s["penalty_minutes"]; ok {
+		if f, ok := v.(float64); ok && f >= 0 {
+			return int(f)
+		}
+	}
+	return 20
+}
+
+// CENoPenalty reports whether a Compile Error (CE) is exempt from ICPC penalty —
+// i.e. a CE before AC does NOT add a penalised wrong attempt.
+//
+// Default true: modern ICPC rules (and the ICPC Tools Resolver's standard
+// judgement types) do not penalise CE. Set settings["ce_no_penalty"] = false to
+// penalise CE (matching some older regional rule sets).
+//
+// This is the single source of truth for CE penalty policy. Both the live
+// scoreboard (core/contest.ICPCStrategy) and the 滚榜 event-feed XML export
+// (api/handler.ResolverHandler) read it, so the two boards always agree on
+// whether a CE-before-AC team carries an extra penalty.
+func (s ContestSettings) CENoPenalty() bool {
+	if v, ok := s["ce_no_penalty"].(bool); ok {
+		return v
+	}
+	return true
+}
+
 // Contest is the top-level entity for a programming competition.
 type Contest struct {
 	ID          ID            `db:"id"           json:"id"`

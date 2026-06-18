@@ -139,3 +139,50 @@ func TestICPC_RevealNext_FrozenWAThenAC(t *testing.T) {
 			r2.IsPending, r2.FrozenAttempts, len(r2.FrozenResults))
 	}
 }
+
+// TestICPC_CEPenaltyPolicy pins the CE-before-AC penalty to the contest's
+// ce_no_penalty setting, the single source of truth shared with the 滚榜 XML
+// export. Default (unset) must NOT penalise CE (modern ICPC); ce_no_penalty=false
+// must penalise it exactly like a WA.
+func TestICPC_CEPenaltyPolicy(t *testing.T) {
+	s := &ICPCStrategy{}
+	start := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	at := minutesFromStart(start)
+
+	tests := []struct {
+		name        string
+		settings    ContestSettings
+		wantPenalty int // 50 min AC + (penalised CE ? 20 : 0)
+	}{
+		{"default: CE not penalised", nil, 50},
+		{"ce_no_penalty=true: CE not penalised", ContestSettings{"ce_no_penalty": true}, 50},
+		{"ce_no_penalty=false: CE penalised", ContestSettings{"ce_no_penalty": false}, 70},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var entry *ScoreEntry
+			// A compile error before the AC.
+			entry = s.Apply(SubmissionEvent{
+				UserID: 1, ProblemID: 2,
+				Status:       models.StatusCE,
+				SubmitTime:   at(10),
+				ContestStart: start,
+			}, entry, tc.settings)
+			// AC at minute 50.
+			entry = s.Apply(SubmissionEvent{
+				UserID: 1, ProblemID: 2,
+				Status:       models.StatusAccepted,
+				SubmitTime:   at(50),
+				ContestStart: start,
+			}, entry, tc.settings)
+
+			if !entry.Accepted {
+				t.Fatal("problem should be solved after the AC")
+			}
+			if entry.Penalty != tc.wantPenalty {
+				t.Errorf("penalty = %d, want %d", entry.Penalty, tc.wantPenalty)
+			}
+		})
+	}
+}
